@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <time.h>
 
 //FUNCTION TO READ THE DIRECTORY PUT AS ARGUMENT IN TERMINAL & RECURSIVELY TRAVERSE EVERY 
 //SUB_DIRECTORY FROM IT. IT SAVES IN A SNAPSHOT.TXT THE PATH AND NAME OF EVERY FILE
@@ -71,24 +72,18 @@ void create_snapshot(const char *path){
     }
     closedir(dir_check);
 
-    int snapshot_files_count=0;
     char snapshot_file_name[FILENAME_MAX];
 
-    struct dirent *dir_file;
-    DIR *dir=opendir("."); //opens current directory for reading
+    time_t now;
+    struct tm *timestamp;  
+    char timestamp_str[32];
 
-    if(dir==NULL){
-        write(STDERR_FILENO, "error: Cannot open the directory\n", strlen("error: Cannot open the directory\n"));
-        exit(EXIT_FAILURE);
-    }
-    while((dir_file=readdir(dir))!=NULL){  //chencking if the snapshot name starts with the "Snapshot_"
-                                           //for counting 
-        if(strstr(dir_file->d_name,"Snapshot_")==dir_file->d_name) snapshot_files_count++;
-    }
-    closedir(dir);
+    time(&now);     //getting the current time
+    timestamp=localtime(&now);
+    strftime(timestamp_str,sizeof(timestamp_str),"(date)%Y.%m.%d_(time)%H:%M:%S", timestamp);
 
     //constructing the name
-    snprintf(snapshot_file_name,sizeof(snapshot_file_name),"Snapshot_%d.txt",snapshot_files_count);
+    snprintf(snapshot_file_name,sizeof(snapshot_file_name),"Snapshot_%s.txt",timestamp_str);
 
     int snapshot_fd=open(snapshot_file_name, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR); 
     if (snapshot_fd ==-1) {
