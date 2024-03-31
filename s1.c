@@ -14,20 +14,25 @@ void read_directories(const char *path, FILE *fp){
                 continue; //all the directories have the entries "." & ".." 
                           //i'm not printing them in the Snapshot file. 
             }
-            char new_path[1024]; //concatenating the path and the name of each entry into 
-                                 // 'new_path'
-            snprintf(new_path, sizeof(new_path), "%s/%s", path, dir_file->d_name);
+            char *new_path=malloc(strlen(path)+strlen(dir_file->d_name) +2);
+            if(new_path==NULL){
+                perror("error: Failed to allocate memory");
+                exit(EXIT_FAILURE);
+            }
+            sprintf(new_path,"%s/%s", path, dir_file->d_name);
 
             struct stat st;                            
             if (lstat(new_path, &st) == -1) { //get file information with lstat
-                perror("error");                    //& print error message in case of failing
+                perror("error");              //& print error message in case of failing
+                free(new_path);                  
                 continue;
             }
             fprintf(fp, "%s\n", new_path); // printing every snapshot_entry in the Snapshot file
-            if(S_ISDIR(st.st_mode)){     //if an entry is a directory
-                                         //recursively call again the function with the new path     
+            if(S_ISDIR(st.st_mode)){       //if an entry is a directory
+                                           //recursively call again the function with the new path     
                 read_directories(new_path, fp);
             }
+            free(new_path);
         }
         closedir(d);
     }
