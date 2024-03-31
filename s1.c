@@ -56,31 +56,49 @@ void read_directories(const char *path, FILE *fp){
     } 
 }
 
-void create_snapshot(const char *path,FILE *snapshot){
-    if(snapshot==NULL){
-        fprintf(stderr,"error: Invalid snapshot file!\n");
+//FUNCTION THAT CREATES A SNAPSHOT OF THE SPECIFIED DIRECTORY
+//AND COUNTS THE EXISTING ONES FOR CONSTRUNCTING THE NAME OF EACH SNAPSHOT 
+void create_snapshot(const char *path){
+
+    int snapshot_files_count=0;
+    char snapshot_file_name[FILENAME_MAX];
+
+    struct dirent *dir_file;
+    DIR *dir=opendir("."); //opens current directory for reading
+
+    if(dir==NULL){
+        fprintf(stderr,"error: Cannot open the directory!\n");
         exit(EXIT_FAILURE);
     }
-    read_directories(path,snapshot);
+    while((dir_file=readdir(dir))!=NULL){  //chencking if the snapshot name starts with the "Snapshot_"
+                                           //and incrementing
+        if(strstr(dir_file->d_name,"Snapshot_")==dir_file->d_name) snapshot_files_count++;
+    }
+    closedir(dir);
+
+    //constructing the name
+    snprintf(snapshot_file_name,sizeof(snapshot_file_name),"Snapshot_%d.txt",snapshot_files_count);
+
+    FILE *snapshot_file=fopen(snapshot_file_name,"w");
+    if(snapshot_file==NULL){
+        fprintf(stderr,"error: Failed to open snapshot file %s !\n",snapshot_file_name);
+        exit(EXIT_FAILURE);
+    }
+
+    read_directories(path,snapshot_file);
+    fclose(snapshot_file);
 }
 
 int main(int argc, char *argv[]){
     
-    FILE *fp = fopen("Snapshot.txt", "w");
-
-    if(fp == NULL){
-        fprintf(stderr,"error: Cannot open the snapshot file!\n");
-        exit(EXIT_FAILURE);        
-    }
     if(argc == 2){
         char *path = argv[1];
-        create_snapshot(path, fp);
+        create_snapshot(path);
+        fprintf(stderr,"Snapshot created succesfully!\n");
     }
     else{
         fprintf(stderr,"error: There should be only one argument!\n");
         exit(EXIT_FAILURE);
     }
-
-    fclose(fp);
     return 0;
 }
