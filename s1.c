@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include <errno.h>
 
+//FUNCTION TO READ THE DIRECTORY PUT AS ARGUMENT IN TERMINAL & RECURSIVELY TRAVERSE EVERY 
+//SUB_DIRECTORY FROM IT. IT SAVES IN A SNAPSHOT.TXT THE PATH AND NAME OF EVERY FILE
 void read_directories(const char *path, FILE *fp){
     DIR *d = opendir(path);
     struct dirent *dir_file;
@@ -54,6 +56,14 @@ void read_directories(const char *path, FILE *fp){
     } 
 }
 
+void create_snapshot(const char *path,FILE *snapshot){
+    if(snapshot==NULL){
+        fprintf(stderr,"error: Invalid snapshot file!\n");
+        exit(EXIT_FAILURE);
+    }
+    read_directories(path,snapshot);
+}
+
 int main(int argc, char *argv[]){
     
     FILE *fp = fopen("Snapshot.txt", "w");
@@ -64,7 +74,7 @@ int main(int argc, char *argv[]){
     }
     if(argc == 2){
         char *path = argv[1];
-        read_directories(path, fp);
+        create_snapshot(path, fp);
     }
     else{
         fprintf(stderr,"error: There should be only one argument!\n");
