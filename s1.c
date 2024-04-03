@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <time.h>
 
+
 //FUNCTION TO READ THE DIRECTORY PUT AS ARGUMENT IN TERMINAL & RECURSIVELY TRAVERSE EVERY 
 //SUB_DIRECTORY FROM IT. IT SAVES IN A SNAPSHOT.TXT THE PATH AND NAME OF EVERY FILE
 void read_directories(const char *path, int snapshot_fd){
@@ -80,7 +81,7 @@ void create_snapshot(const char *path){
 
     time(&now);     //getting the current time
     timestamp=localtime(&now);
-    strftime(timestamp_str,sizeof(timestamp_str),"(date)%Y.%m.%d_(time)%H:%M:%S", timestamp);
+    strftime(timestamp_str,sizeof(timestamp_str),"%Y.%m.%d_%H:%M:%S", timestamp);
 
     //constructing the name
     snprintf(snapshot_file_name,sizeof(snapshot_file_name),"Snapshot_%s.txt",timestamp_str);
