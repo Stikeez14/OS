@@ -50,7 +50,8 @@ void read_directories(const char *path, int snapshot_fd){
             new_path=realloc(new_path,strlen(path)+strlen(dir_file->d_name) +2); //+2 is for '/' and null terminator
             if(new_path==NULL){                                             
                 write(STDERR_FILENO, "error: Failed to allocate memory for path ", strlen("error: Failed to allocate memory for path "));
-                write(STDERR_FILENO, path, strlen(path));   
+                write(STDERR_FILENO, path, strlen(path));   //if the allocation of memory fails, after the printed error
+                                                            //the loop will break => the directory will not be monitored anymore 
                 write(STDERR_FILENO,"\n",1);
                 break;
             }
@@ -88,19 +89,32 @@ void read_directories(const char *path, int snapshot_fd){
 
 //FUNCTION THAT CREATES A SNAPSHOT OF THE SPECIFIED DIRECTORY
 //AND COUNTS THE EXISTING ONES FOR CONSTRUNCTING THE NAME OF EACH SNAPSHOT 
-void create_snapshot(char *path){
+void create_snapshot(char *path, char *output_path){
 
     char *dir_name=basename((char *)path);
+    char *output_dir_name=basename((char *)output_path);
 
-    DIR *dir_check=opendir(path); //checking if the directory given as argument exists
+    DIR *dir_check=opendir(path); //checking if the directories given as arguments for monitoring   
+                                  //exist. If the path is incorrect the error message will be printed to stderr 
+                                  //and it will be skipped
 
     if(dir_check==NULL){
         write(STDERR_FILENO, "error: The directory \"", strlen("error: The directory \""));
         write(STDERR_FILENO,dir_name,strlen(dir_name));
-        write(STDERR_FILENO,"\" does not exist\n",strlen("\" does not exits\n"));
+        write(STDERR_FILENO,"\" does not exist!\n",strlen("\" does not exits!\n"));
         return;
     }
     closedir(dir_check);
+
+    dir_check=opendir(output_path); //checking if the output directory given as argument exists. If the path is incorrect
+                                    //the snapshots does not have a place to be stored so the program exits.
+    if(dir_check==NULL){
+        write(STDERR_FILENO, "error: The output directory \"", strlen("error: The output directory \""));
+        write(STDERR_FILENO,output_dir_name,strlen(output_dir_name));
+        write(STDERR_FILENO,"\" does not exist => Snapshots cannot be saved! => Exiting Program!\n",strlen("\" does not exist => Snapshots cannot be saved! => Exiting Program!\n"));
+        exit(EXIT_FAILURE);
+    }
+    closedir(dir_check); 
 
     char snapshot_file_name[FILENAME_MAX];
    
@@ -114,7 +128,7 @@ void create_snapshot(char *path){
 
     //constructing the snapshot file name with directory name and timestamp
     //it's also creating the snapshot file in the given path as argument
-    snprintf(snapshot_file_name, sizeof(snapshot_file_name), "%s/%s_Snapshot_%s.txt",path,dir_name,timestamp_str);
+    snprintf(snapshot_file_name, sizeof(snapshot_file_name), "%s/%s_Snapshot_%s.txt",output_path,dir_name,timestamp_str);
   
     int snapshot_fd = open(snapshot_file_name, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR); 
     if(snapshot_fd == -1){
@@ -137,44 +151,48 @@ void create_snapshot(char *path){
     close(snapshot_fd);
 }
 
-
 int main(int argc, char *argv[]){
     
     if(argc < 4){ // minimum 4 arguments because now I need "-o" and the output directory,
                   // the ./a.out and the rest of the paths to directories that will be monitored
-        write(STDERR_FILENO, "error: Not enough arguments!\n", strlen("error: Not enough arguments!\n"));
+        write(STDERR_FILENO, "error: Not enough arguments! => Exiting program!\n", strlen("error: Not enough arguments! => Exiting program!\n"));
         exit(EXIT_FAILURE);
     }
     else{
+
+        char *output_path=NULL;
         int o_count=0;
+
         for(int i=0;i<argc;i++){          //parsing through all the arguments 
             if(strcmp(argv[i],"-o")==0){  //for error handling
                 o_count++;
+                output_path=argv[i+1];
             }
             if(o_count<1 && i+1==argc){
-                     write(STDERR_FILENO,"error: The argument \"-o\" was not detected in the terminal!\n",strlen("error: The argument \"-o\" was not detected in the terminal!\n"));
+                     write(STDERR_FILENO,"error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n",strlen("error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n"));
                      exit(EXIT_FAILURE);
             }
             if(o_count>1){
-                    write(STDERR_FILENO,"error: The argument \"-o\" was detected more than once in the terminal!\n",strlen("error: The argument \"-o\" was detected more than once in the terminal!\n"));
+                    write(STDERR_FILENO,"error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n",strlen("error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n"));
                     exit(EXIT_FAILURE);
             }
             if(strcmp(argv[i],"-o")==0 && i+1==argc){
-                write(STDERR_FILENO,"error: \"-o\" cannot be the last argument!\n",strlen("error: \"-o\" cannot be the last argument!\n"));
+                write(STDERR_FILENO,"error: \"-o\" cannot be the last argument! => Exiting program!\n",strlen("error: \"-o\" cannot be the last argument! => Exiting program!\n"));
                 exit(EXIT_FAILURE);
             }
         }
+
         for(int i=1;i<argc;i++){  //parsing again through all the argument
                 if(strcmp(argv[i],"-o")==0 && i+1<argc){ //basically if the argument is "-o" then the next one
-                    char *output_path=argv[i+1];         //is the output directory
-                    create_snapshot(output_path);
+                                                         //is the output directory so we skip it
                     i++;
                 }
                 else{
-                    char *path = argv[i];    //the rest of the arguments are directories
-                    create_snapshot(path);   //that are monotored
+                    char *path = argv[i];                //the rest of the arguments are directories
+                    create_snapshot(path,output_path);   //that are monotored
                 }
         }
     }
+
     return EXIT_SUCCESS;
 }

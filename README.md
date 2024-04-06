@@ -28,4 +28,4 @@ For example, the command to run the program will be:   `./program_exe -o output 
 
 ## S2 Testing
 
-I tested my implementation on my **Fedora** operating system by providing the paths **/home/stikeez_/Desktop/TEST1** & **/home/stikeez_/Desktop/TEST2** for the directories that I wanted to be monitored in the terminal as argument.
+I tested my implementation on my `Fedora` operating system. I did not encouter any problems so far in testing the program.
