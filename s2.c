@@ -57,7 +57,7 @@ void read_directories(const char *path, int snapshot_fd){
             }
 
             sprintf(new_path,"%s/%s", path, dir_entry->d_name); //constructing the path
-            //NEED TO COME BACK LATER AND GIVE MORE INFO 
+            //NEED TO COME BACK LATER AND GIVE MORE INFO  <-- !!
 
             struct stat st;                            
             if(lstat(new_path, &st) == -1) {                                   //get file information with lstat
@@ -115,7 +115,8 @@ int count_snapshots(const char *output_path,const char *dir_name){
     return count;
 }
 
-
+//compares the snapshot that is created when the program runs, with the snapshot that was created before
+//overrides the previous snapshot with the information of the current
 void compare_snapshots(const char *output_path, const char *dir_name,const char *snapshot_file_name, int snp_no){
 
     DIR *d=opendir(output_path);
@@ -131,8 +132,8 @@ void compare_snapshots(const char *output_path, const char *dir_name,const char 
                 prev_snapshot_no=atoi(snp_no_str);   //changes the string to int
 
                 if(prev_snapshot_no<snp_no) {
-                    strcpy(prev_snapshot_file_name,output_path);
-                    strcat(prev_snapshot_file_name,"/");
+                    strcpy(prev_snapshot_file_name,output_path);    //--> contructing the path + name of the previous
+                    strcat(prev_snapshot_file_name,"/");            //    snapshot file
                     strcat(prev_snapshot_file_name,dir_entry->d_name);
                     strcat(prev_snapshot_file_name,"(");
                     strcat(prev_snapshot_file_name,snp_no_str);
@@ -141,8 +142,8 @@ void compare_snapshots(const char *output_path, const char *dir_name,const char 
         }
     
         if(prev_snapshot_no<1){
-            write(STDERR_FILENO,"--> no snapshots were previously created for \"",
-                strlen("--> no snapshots were previously created for \""));
+            write(STDERR_FILENO,"--> no snapshots were previously created for \"",   //if in the folder is not a previous
+                strlen("--> no snapshots were previously created for \""));          //snapshot => no comparison will be made
             write(STDERR_FILENO,dir_name,strlen(dir_name));
             write(STDERR_FILENO,"\"!\n",strlen("\"!\n"));
         }
@@ -166,7 +167,7 @@ void compare_snapshots(const char *output_path, const char *dir_name,const char 
                 return;
             }
 
-            char current_line[256];  //storing the lines into the two bubffers
+            char current_line[256];  //will store the lines into these two bubffers
             char prev_line[256];
             int line=1;
             int IsDifferent=0;
@@ -176,24 +177,36 @@ void compare_snapshots(const char *output_path, const char *dir_name,const char 
                 ssize_t current_read=read(snapshot_fd_current, current_line, sizeof(current_line)-1); //reading data from the snapshot 
                 ssize_t prev_read=read(snapshot_fd_prev, prev_line, sizeof(prev_line)-1);             //file descriptors into the buffers 
 
+                if(current_read==0 && prev_read==0){ //files reached EOF
+                    break;
+                }
                 if(current_read==0 || prev_read==0){ //if one of the files has less lines
-                    if(current_read!=prev_read){     // => the files are different
-                        fprintf(stderr,"A difference has been found at line %d\n",line);
-                        IsDifferent=1;
+                                                     // => the files are different
+                    if(current_read==0){
+                        lseek(snapshot_fd_current, -prev_read, SEEK_CUR);  //positions the file pointer at the beginning of the line
+                                                                           // in the prev snapshot
+                            while(read(snapshot_fd_prev, prev_line, sizeof(prev_line)-1)>0){
+                                write(snapshot_fd_current, prev_line, strlen(prev_line)); 
+                            }                                                                     // --> write the lines of the fie that
+                    } else {                                                                      // has more in the prev snapshot
+                        while(read(snapshot_fd_current, current_line, sizeof(current_line)-1)>0){
+                            write(snapshot_fd_prev, current_line, strlen(current_line));
+                        }
                     }
-                    break; //break when reaching EOF
+                    IsDifferent=1;
                 }
 
                 if(strcmp(current_line, prev_line)!=0){   //if the current lines are not equal => files are diff
-                    fprintf(stderr,"A difference has been found at line %d\n",line);       
-                    IsDifferent=1;
-                    break;  //stops at the first diff
+                                                          // --> will override the previous snapshot
+                    lseek(snapshot_fd_prev, -prev_read, SEEK_CUR);  //
+                    write(snapshot_fd_prev, current_line, strlen(current_line)); //writing in the previous snapshot
+                    IsDifferent = 1;                                             //the line from the current snapshot
                 }
 
                 line++;
             }
 
-            if(!IsDifferent){
+            if(!IsDifferent){   //in case no difference is found
                 write(STDERR_FILENO,"No differences found in the snapshots!\n",
                     strlen("No differences found in the snapshots!\n"));
             }
