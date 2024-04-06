@@ -116,20 +116,93 @@ int count_snapshots(const char *output_path,const char *dir_name){
 }
 
 
-void compare_snapshots(const char *output_path,const char *dir_name){
-    
+void compare_snapshots(const char *output_path, const char *dir_name,const char *snapshot_file_name, int snp_no){
+
     DIR *d=opendir(output_path);
     struct dirent *dir_entry;
-                                    //STILL NEED TO WORK ON THIS         
+                                           
     if(d){
+        int prev_snapshot_no=0;
+        char prev_snapshot_file_name[FILENAME_MAX];
         while((dir_entry=readdir(d))!=NULL){
             if(strstr(dir_entry->d_name,dir_name)==dir_entry->d_name && strstr(dir_entry->d_name,"_Snapshot(")!=NULL){
                 char *snp_no_str=strtok(dir_entry->d_name,"(");    //tokenized the name for obtaining the substring
                 snp_no_str=strtok(NULL,"(");                       //containing the snp_no
+                prev_snapshot_no=atoi(snp_no_str);   //changes the string to int
 
-                int snapshot_no=atoi(snp_no_str);     //changes the string to int
+                if(prev_snapshot_no<snp_no) {
+                    strcpy(prev_snapshot_file_name,output_path);
+                    strcat(prev_snapshot_file_name,"/");
+                    strcat(prev_snapshot_file_name,dir_entry->d_name);
+                    strcat(prev_snapshot_file_name,"(");
+                    strcat(prev_snapshot_file_name,snp_no_str);
+                } 
             }
         }
+    
+        if(prev_snapshot_no<1){
+            write(STDERR_FILENO,"--> no snapshots were previously created for \"",
+                strlen("--> no snapshots were previously created for \""));
+            write(STDERR_FILENO,dir_name,strlen(dir_name));
+            write(STDERR_FILENO,"\"!\n",strlen("\"!\n"));
+        }
+        else{
+            int snapshot_fd_current = open(snapshot_file_name, O_RDONLY, S_IRUSR); //opening the current snapshot file in reading mode
+            if(snapshot_fd_current == -1){
+                write(STDERR_FILENO, "error: Failed to open the current snapshot file for \"",
+                    strlen("error: Failed to open the snapshot file for \""));
+                write(STDERR_FILENO,dir_name,strlen(dir_name));
+                write(STDERR_FILENO,"\"\n",strlen("\"\n"));
+                return;
+            }
+
+            int snapshot_fd_prev = open(prev_snapshot_file_name, O_RDWR, S_IRUSR); //opening the previous snapshot file in reading 
+                                                                                   //and writing mode
+            if(snapshot_fd_prev == -1){
+                write(STDERR_FILENO, "error: Failed to open the previous snapshot file for \"",
+                    strlen("error: Failed to open the snapshot file for \""));
+                write(STDERR_FILENO,dir_name,strlen(dir_name));
+                write(STDERR_FILENO,"\"\n",strlen("\"\n"));
+                return;
+            }
+
+            char current_line[256];  //storing the lines into the two bubffers
+            char prev_line[256];
+            int line=1;
+            int IsDifferent=0;
+
+               while(1){
+
+                ssize_t current_read=read(snapshot_fd_current, current_line, sizeof(current_line)-1); //reading data from the snapshot 
+                ssize_t prev_read=read(snapshot_fd_prev, prev_line, sizeof(prev_line)-1);             //file descriptors into the buffers 
+
+                if(current_read==0 || prev_read==0){ //if one of the files has less lines
+                    if(current_read!=prev_read){     // => the files are different
+                        fprintf(stderr,"A difference has been found at line %d\n",line);
+                        IsDifferent=1;
+                    }
+                    break; //break when reaching EOF
+                }
+
+                if(strcmp(current_line, prev_line)!=0){   //if the current lines are not equal => files are diff
+                    fprintf(stderr,"A difference has been found at line %d\n",line);       
+                    IsDifferent=1;
+                    break;  //stops at the first diff
+                }
+
+                line++;
+            }
+
+            if(!IsDifferent){
+                write(STDERR_FILENO,"No differences found in the snapshots!\n",
+                    strlen("No differences found in the snapshots!\n"));
+            }
+
+            close(snapshot_fd_current);
+            close(snapshot_fd_prev);
+        }
+
+        closedir(d);
     }
 }
 
@@ -198,7 +271,7 @@ void create_snapshot(char *path, char *output_path){
     // (MAYBE AN EXECUTION TIME TO SEE HOW MUCH IT TAKES OR AN PROGRESSION BAR IN THE FUTURE)
 
     close(snapshot_fd);
-    compare_snapshots(output_path,dir_name);
+    compare_snapshots(output_path,dir_name,snapshot_file_name,snapshots_no);
 }
 
 
@@ -243,11 +316,12 @@ int main(int argc, char *argv[]){
                     i++;
                 }
                 else{
+                    write(STDERR_FILENO,"\n",1);
                     char *path = argv[i];                //the rest of the arguments are directories
                     create_snapshot(path,output_path);   //that are monotored
                 }
         }
     }
-
+    write(STDERR_FILENO,"\n",1);
     return EXIT_SUCCESS;
 }
