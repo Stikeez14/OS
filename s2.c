@@ -30,24 +30,24 @@
 #include <libgen.h>
 
 
-//FUNCTION TO READ THE DIRECTORY PUT AS ARGUMENT IN TERMINAL & RECURSIVELY TRAVERSE EVERY 
-//SUB_DIRECTORY FROM IT. IT SAVES IN A SNAPSHOT.TXT THE PATH AND NAME OF EVERY FILE
+//traverse the directory given as argument and his sub_directories recursively
+//and writes in the snapshot file the path and the name of each entry 
 void read_directories(const char *path, int snapshot_fd){
 
     DIR *d = opendir(path);
-    struct dirent *dir_file;
+    struct dirent *dir_entry;
     
     char *new_path=NULL; 
 
     char *dir_name=basename((char*)path); //from libgen, used for getting the name of entries from each path
 
     if(d){
-        while((dir_file = readdir(d)) != NULL){
-            if(strcmp(dir_file->d_name, ".") == 0 || strcmp(dir_file->d_name, "..") == 0){
+        while((dir_entry = readdir(d)) != NULL){
+            if(strcmp(dir_entry->d_name, ".") == 0 || strcmp(dir_entry->d_name, "..") == 0){
                 continue; //all the directories have the entries "." & ".." 
                           //i'm not printing them in the Snapshot file. 
             }
-            new_path=realloc(new_path,strlen(path)+strlen(dir_file->d_name) +2); //+2 is for '/' and null terminator
+            new_path=realloc(new_path,strlen(path)+strlen(dir_entry->d_name) +2); //+2 is for '/' and null terminator
             if(new_path==NULL){                                             
                 write(STDERR_FILENO, "error: Failed to allocate memory for path ", strlen("error: Failed to allocate memory for path "));
                 write(STDERR_FILENO, path, strlen(path));   //if the allocation of memory fails, after the printed error
@@ -56,12 +56,13 @@ void read_directories(const char *path, int snapshot_fd){
                 break;
             }
 
-            sprintf(new_path,"%s/%s", path, dir_file->d_name); //constructing the path
-            //NEED TO COME BACK LATER AND VERIFY THIS
+            sprintf(new_path,"%s/%s", path, dir_entry->d_name); //constructing the path
+            //NEED TO COME BACK LATER AND GIVE MORE INFO 
+
             struct stat st;                            
             if(lstat(new_path, &st) == -1) {                                                                                    //get file information with lstat
                 write(STDERR_FILENO, "error: Failed to get information for ", strlen("error: Failed to get information for "));  //& print error message in case of failing
-                write(STDERR_FILENO, dir_file->d_name, strlen(dir_file->d_name)); //writing the entry causing the error
+                write(STDERR_FILENO, dir_entry->d_name, strlen(dir_entry->d_name)); //writing the entry causing the error
                 write(STDERR_FILENO,"\n",strlen("\n"));
                 free(new_path);                  //THIS REQUIRE ANOTHER LOOK AT IT
                 continue;
@@ -87,8 +88,36 @@ void read_directories(const char *path, int snapshot_fd){
     } 
 }
 
-//FUNCTION THAT CREATES A SNAPSHOT OF THE SPECIFIED DIRECTORY
-//AND COUNTS THE EXISTING ONES FOR CONSTRUNCTING THE NAME OF EACH SNAPSHOT 
+
+//counts the existing snapshots created for each monitored directory
+//from the output directory. If no snapshot is found for one of the directories, it will return 0
+int count_snapshots(const char *output_path,const char *dir_name){
+    
+    int count=0;
+
+    DIR *d=opendir(output_path);
+    struct dirent *dir_entry;
+
+    if(d){
+        while((dir_entry=readdir(d))!=NULL){ 
+
+            if(strstr(dir_entry->d_name,"_Snapshot(")!=NULL && strstr(dir_entry->d_name,".txt")!=NULL){
+                char *snapshot_dir_name=strtok(dir_entry->d_name,"_");
+                if(snapshot_dir_name!=NULL && strcmp(snapshot_dir_name,dir_name)==0){
+                    count++;
+                }
+            }
+        }
+        closedir(d);
+    }  //no error checking here because if the output path is incorrect the program exits before calling 
+       //this function in create_snapshot()
+
+    return count;
+}
+
+
+//creates a snapshot file in the output directory for each 
+//directory given as argument in the terminal for monitoring
 void create_snapshot(char *path, char *output_path){
 
     char *dir_name=basename((char *)path);
@@ -117,8 +146,9 @@ void create_snapshot(char *path, char *output_path){
     closedir(dir_check); 
 
     char snapshot_file_name[FILENAME_MAX];
-   
-    time_t now;
+    int snapshots=count_snapshots(output_path,dir_name); // --> calls the function and gets the no. of existing snapshots 
+                                                         // (starts counting from 0)
+    time_t now;                                         
     struct tm *timestamp;  
     char timestamp_str[32];
 
@@ -126,9 +156,8 @@ void create_snapshot(char *path, char *output_path){
     timestamp=localtime(&now);
     strftime(timestamp_str,sizeof(timestamp_str),"%Y.%m.%d_%H:%M:%S", timestamp);
 
-    //constructing the snapshot file name with directory name and timestamp
-    //it's also creating the snapshot file in the given path as argument
-    snprintf(snapshot_file_name, sizeof(snapshot_file_name), "%s/%s_Snapshot_%s.txt",output_path,dir_name,timestamp_str);
+    //constructing the snapshot file name with: output_path --> directory name --> snapshot number --> and timestamp
+    snprintf(snapshot_file_name, sizeof(snapshot_file_name), "%s/%s_Snapshot(%d)_%s.txt",output_path,dir_name,snapshots,timestamp_str);
   
     int snapshot_fd = open(snapshot_file_name, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR); 
     if(snapshot_fd == -1){
@@ -149,7 +178,9 @@ void create_snapshot(char *path, char *output_path){
     // (MAYBE AN EXECUTION TIME TO SEE HOW MUCH IT TAKES OR AN PROGRESSION BAR IN THE FUTURE)
 
     close(snapshot_fd);
+    //compare_snapshots(output_path,snapshot_file_name);
 }
+
 
 int main(int argc, char *argv[]){
     
@@ -169,15 +200,15 @@ int main(int argc, char *argv[]){
                 output_path=argv[i+1];
             }
             if(o_count<1 && i+1==argc){
-                     write(STDERR_FILENO,"error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n",strlen("error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n"));
+                     write(STDERR_FILENO,"error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n", strlen("error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n"));
                      exit(EXIT_FAILURE);
             }
             if(o_count>1){
-                    write(STDERR_FILENO,"error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n",strlen("error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n"));
+                    write(STDERR_FILENO,"error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n", strlen("error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n"));
                     exit(EXIT_FAILURE);
             }
             if(strcmp(argv[i],"-o")==0 && i+1==argc){
-                write(STDERR_FILENO,"error: \"-o\" cannot be the last argument! => Exiting program!\n",strlen("error: \"-o\" cannot be the last argument! => Exiting program!\n"));
+                write(STDERR_FILENO,"error: \"-o\" cannot be the last argument! => Exiting program!\n", strlen("error: \"-o\" cannot be the last argument! => Exiting program!\n"));
                 exit(EXIT_FAILURE);
             }
         }
