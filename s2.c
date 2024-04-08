@@ -30,6 +30,14 @@
 #include <libgen.h>
 
 
+//used mostly for error handling and printing messages
+void write_message(const char *message,const char* dir_name){
+    write(STDERR_FILENO,message,strlen(message));
+    write(STDERR_FILENO,dir_name,strlen(dir_name));
+    write(STDERR_FILENO,"\n",1);
+}
+
+
 //traverse the directory given as argument and his sub_directories recursively
 //and writes in the snapshot file the path and the name of each entry 
 void read_directories(const char *path, int snapshot_fd){
@@ -41,53 +49,41 @@ void read_directories(const char *path, int snapshot_fd){
 
     char *dir_name=basename((char*)path); //from libgen, used for getting the name of the input directory
 
-    if(d){
-        while((dir_entry = readdir(d)) != NULL){
-            if(strcmp(dir_entry->d_name, ".") == 0 || strcmp(dir_entry->d_name, "..") == 0){
-                continue; //all the directories have the entries "." & ".." 
-                          //i'm not printing them in the Snapshot file. 
-            }
-            new_path=realloc(new_path,strlen(path)+strlen(dir_entry->d_name) +2); //+2 is for '/' and null terminator
-            if(new_path==NULL){                                             
-                write(STDERR_FILENO, "error: Failed to allocate memory for path ", strlen("error: Failed to allocate memory for path "));
-                write(STDERR_FILENO, path, strlen(path));   //if the allocation of memory fails, after the printed error
-                                                            //the loop will break => the directory will not be monitored anymore 
-                write(STDERR_FILENO,"\n",1);
-                break;
-            }
-
-            sprintf(new_path,"%s/%s", path, dir_entry->d_name); //constructing the path
-            //NEED TO COME BACK LATER AND GIVE MORE INFO  <-- !!
-
-            struct stat st;                            
-            if(lstat(new_path, &st) == -1) {                                   //get file information with lstat
-                write(STDERR_FILENO, "error: Failed to get information for ",  //& print error message in case of failing
-                    strlen("error: Failed to get information for "));  
-                write(STDERR_FILENO, dir_entry->d_name, strlen(dir_entry->d_name)); //writing the entry causing the error
-                write(STDERR_FILENO,"\n",strlen("\n"));
-                free(new_path);                  //THIS REQUIRE ANOTHER LOOK AT IT
-                continue;
-            }
-
-            write(snapshot_fd, new_path, strlen(new_path)); //writing the path and name of each file to 
-                                                            //the snapshot file
-            write(snapshot_fd, "\n", 1);   //writing newline after each line
-
-            if(S_ISDIR(st.st_mode)){       //if an entry is a directory
-                                           //recursively call again the function with the new path     
-                read_directories(new_path, snapshot_fd);
-            }
+    
+    while((dir_entry = readdir(d)) != NULL){
+        if(strcmp(dir_entry->d_name, ".") == 0 || strcmp(dir_entry->d_name, "..") == 0){
+            continue; //all the directories have the entries "." & ".." 
+                      //i'm not printing them in the Snapshot file. 
         }
-        free(new_path);
-        closedir(d);
+        new_path=realloc(new_path,strlen(path)+strlen(dir_entry->d_name) +2); //+2 is for '/' and null terminator
+        if(new_path==NULL){         
+            write_message("error: Failed to allocate memory for path ",path);   
+                    //if the allocation of memory fails, after the printed error
+                    //the loop will break => the directory will not be monitored anymore        
+            break;
+        }
+
+        sprintf(new_path,"%s/%s", path, dir_entry->d_name); //constructing the path
+        //NEED TO COME BACK LATER AND GIVE MORE INFO  <-- !!
+
+        struct stat st;                     //get file information with lstat      
+        if(lstat(new_path, &st) == -1) {    //& print error message in case of failing     
+            write_message("error: Failed to get information for ",dir_entry->d_name);                             
+            free(new_path);              
+            continue;    //THIS REQUIRE ANOTHER LOOK AT IT
+        }
+
+        write(snapshot_fd, new_path, strlen(new_path)); //writing the path and name of each file to 
+                                                        //the snapshot file
+        write(snapshot_fd, "\n", 1);   //writing newline after each line
+
+        if(S_ISDIR(st.st_mode)){       //if an entry is a directory
+                                       //recursively call again the function with the new path     
+            read_directories(new_path, snapshot_fd);
+        }
     }
-    else{
-        write(STDERR_FILENO, "error: Failed to open the directory \"", 
-            strlen("error: Failed to open the directory \""));
-        write(STDERR_FILENO,dir_name,strlen(dir_name));
-        write(STDERR_FILENO,"\"\n",strlen("\"\n"));
-        return;
-    } 
+    free(new_path);
+    closedir(d);
 }
 
 
@@ -100,17 +96,16 @@ int count_snapshots(const char *output_path,const char *dir_name){
     DIR *d=opendir(output_path);
     struct dirent *dir_entry;
 
-    if(d){
-        while((dir_entry=readdir(d))!=NULL){ 
+    while((dir_entry=readdir(d))!=NULL){ 
 
-           if (strstr(dir_entry->d_name, dir_name) == dir_entry->d_name &&  //cheks if the dir_name matches the beggining
-                strstr(dir_entry->d_name, "_Snapshot(") != NULL) {          //of the snapshot file name & if it contains the substring 
-                count++;
-            }
+       if(strstr(dir_entry->d_name, dir_name) == dir_entry->d_name &&  //cheks if the dir_name matches the beggining
+            strstr(dir_entry->d_name, "_Snapshot(") != NULL) {         //of the snapshot file name & if it contains the substring 
+            count++;
         }
-        closedir(d);
-    }  //no error checking here because if the output path is incorrect the program exits before calling 
-       //this function in create_snapshot()
+    }
+    closedir(d);
+      //no error checking here because if the output path is incorrect the program exits before calling 
+      //this function in create_snapshot()
 
     return count;
 }
@@ -122,101 +117,92 @@ void compare_snapshots(const char *output_path, const char *dir_name,const char 
     DIR *d=opendir(output_path);
     struct dirent *dir_entry;
                                            
-    if(d){
-        int prev_snapshot_no=0;
-        char prev_snapshot_file_name[FILENAME_MAX];
-        while((dir_entry=readdir(d))!=NULL){
-            if(strstr(dir_entry->d_name,dir_name)==dir_entry->d_name && strstr(dir_entry->d_name,"_Snapshot(")!=NULL){
-                char *snp_no_str=strtok(dir_entry->d_name,"(");    //tokenized the name for obtaining the substring
-                snp_no_str=strtok(NULL,"(");                       //containing the snp_no
-                prev_snapshot_no=atoi(snp_no_str);   //changes the string to int
+    int prev_snapshot_no=0;
+    char prev_snapshot_file_name[FILENAME_MAX];
 
-                if(prev_snapshot_no<snp_no) {
-                    strcpy(prev_snapshot_file_name,output_path);    //--> contructing the path + name of the previous
-                    strcat(prev_snapshot_file_name,"/");            //    snapshot file
-                    strcat(prev_snapshot_file_name,dir_entry->d_name);
-                    strcat(prev_snapshot_file_name,"(");
-                    strcat(prev_snapshot_file_name,snp_no_str);
-                } 
-            }
+        //parsing through all the snapshot files from the output that starts with
+        //directory name that is monitored
+    while((dir_entry=readdir(d))!=NULL){
+        if(strstr(dir_entry->d_name,dir_name)==dir_entry->d_name && strstr(dir_entry->d_name,"_Snapshot(")!=NULL){
+            char *snp_no_str=strtok(dir_entry->d_name,"(");    //tokenized the name for obtaining the substring
+            snp_no_str=strtok(NULL,"(");                       //containing the snapshot number (ex --> (2) )
+            prev_snapshot_no=atoi(snp_no_str);   //convert the string to int
+
+            if(prev_snapshot_no<snp_no){
+                strcpy(prev_snapshot_file_name,output_path);    //--> constructing the name of the previous
+                strcat(prev_snapshot_file_name,"/");            //    snapshot file
+                strcat(prev_snapshot_file_name,dir_entry->d_name);
+                strcat(prev_snapshot_file_name,"(");
+                strcat(prev_snapshot_file_name,snp_no_str);
+            } 
         }
-    
-        if(prev_snapshot_no<1){
-            write(STDERR_FILENO,"--> no snapshots were previously created for \"",   //if in the folder is not a previous
-                strlen("--> no snapshots were previously created for \""));          //snapshot => no comparison will be made
-            write(STDERR_FILENO,dir_name,strlen(dir_name));
-            write(STDERR_FILENO,"\"!\n",strlen("\"!\n"));
-        }
-        else{
-            int snapshot_fd_current = open(snapshot_file_name, O_RDONLY, S_IRUSR); //opening the current snapshot file in reading mode
-            if(snapshot_fd_current == -1){
-                write(STDERR_FILENO, "error: Failed to open the current snapshot file for \"",
-                    strlen("error: Failed to open the snapshot file for \""));
-                write(STDERR_FILENO,dir_name,strlen(dir_name));
-                write(STDERR_FILENO,"\"\n",strlen("\"\n"));
-                return;
-            }
-
-            int snapshot_fd_prev = open(prev_snapshot_file_name, O_RDWR, S_IRUSR); //opening the previous snapshot file in reading 
-                                                                                   //and writing mode
-            if(snapshot_fd_prev == -1){
-                write(STDERR_FILENO, "error: Failed to open the previous snapshot file for \"",
-                    strlen("error: Failed to open the snapshot file for \""));
-                write(STDERR_FILENO,dir_name,strlen(dir_name));
-                write(STDERR_FILENO,"\"\n",strlen("\"\n"));
-                return;
-            }
-
-            char current_line[256];  //will store the lines into these two bubffers
-            char prev_line[256];
-            int line=1;
-            int IsDifferent=0;
-
-               while(1){
-
-                ssize_t current_read=read(snapshot_fd_current, current_line, sizeof(current_line)-1); //reading data from the snapshot 
-                ssize_t prev_read=read(snapshot_fd_prev, prev_line, sizeof(prev_line)-1);             //file descriptors into the buffers 
-
-                if(current_read==0 && prev_read==0){ //files reached EOF
-                    break;
-                }
-                if(current_read==0 || prev_read==0){ //if one of the files has less lines
-                                                     // => the files are different
-                    if(current_read==0){
-                        lseek(snapshot_fd_current, -prev_read, SEEK_CUR);  //positions the file pointer at the beginning of the line
-                                                                           // in the prev snapshot
-                            while(read(snapshot_fd_prev, prev_line, sizeof(prev_line)-1)>0){
-                                write(snapshot_fd_current, prev_line, strlen(prev_line)); 
-                            }                                                                     // --> write the lines of the fie that
-                    } else {                                                                      // has more in the prev snapshot
-                        while(read(snapshot_fd_current, current_line, sizeof(current_line)-1)>0){
-                            write(snapshot_fd_prev, current_line, strlen(current_line));
-                        }
-                    }
-                    IsDifferent=1;
-                }
-
-                if(strcmp(current_line, prev_line)!=0){   //if the current lines are not equal => files are diff
-                                                          // --> will override the previous snapshot
-                    lseek(snapshot_fd_prev, -prev_read, SEEK_CUR);  //
-                    write(snapshot_fd_prev, current_line, strlen(current_line)); //writing in the previous snapshot
-                    IsDifferent = 1;                                             //the line from the current snapshot
-                }
-
-                line++;
-            }
-
-            if(!IsDifferent){   //in case no difference is found
-                write(STDERR_FILENO,"No differences found in the snapshots!\n",
-                    strlen("No differences found in the snapshots!\n"));
-            }
-
-            close(snapshot_fd_current);
-            close(snapshot_fd_prev);
-        }
-
-        closedir(d);
     }
+    
+    if(prev_snapshot_no<1){  //if in the folder is not a previous snapshot => no comparison will be made
+        write_message("--> no snapshots were previously created for ",dir_name);
+    }
+    else{
+        int snapshot_fd_current = open(snapshot_file_name, O_RDONLY, S_IRUSR); //opening the current snapshot file in reading mode
+        if(snapshot_fd_current == -1){
+            write_message("error: Failed to open the current snapshot file for ",dir_name);
+            return;
+        }
+
+        int snapshot_fd_prev = open(prev_snapshot_file_name, O_RDWR, S_IRUSR); //opening the previous snapshot file in reading 
+                                                                                   //and writing mode
+        if(snapshot_fd_prev == -1){
+            write_message("error: Failed to open the previous snapshot file for ",dir_name);
+            return;
+        }
+
+        char current_line[256];  //will store the lines into these two bubffers
+        char prev_line[256];
+        int line=1;
+        int IsDifferent=0;
+
+        while(1){
+
+            ssize_t current_read=read(snapshot_fd_current, current_line, sizeof(current_line)-1); //reading data from the snapshot 
+            ssize_t prev_read=read(snapshot_fd_prev, prev_line, sizeof(prev_line)-1);             //file descriptors into the buffers 
+
+            if(current_read==0 && prev_read==0){ //files reached EOF
+                break;
+            }
+            if(current_read==0 || prev_read==0){ //if one of the files has less lines
+                                                     // => the files are different
+                if(current_read==0){
+                    lseek(snapshot_fd_current, -prev_read, SEEK_CUR);  //positions the file pointer at the beginning of the line
+                                                                       // in the prev snapshot
+                    while(read(snapshot_fd_prev, prev_line, sizeof(prev_line)-1)>0){
+                        write(snapshot_fd_current, prev_line, strlen(prev_line)); 
+                        }                                                                     // --> write the lines of the fie that
+                } else{                                                                      // has more in the prev snapshot
+                    while(read(snapshot_fd_current, current_line, sizeof(current_line)-1)>0){
+                        write(snapshot_fd_prev, current_line, strlen(current_line));
+                    }
+                }               //REVENIM CU DOUA BUFERE 
+                IsDifferent=1;
+            }
+
+            if(strcmp(current_line, prev_line)!=0){   //if the current lines are not equal => files are diff
+                                                      // --> will override the previous snapshot
+                lseek(snapshot_fd_prev, -prev_read, SEEK_CUR);  //
+                write(snapshot_fd_prev, current_line, strlen(current_line)); //writing in the previous snapshot
+                IsDifferent = 1;                                             //the line from the current snapshot
+            }
+
+            line++;
+        }
+
+        if(!IsDifferent){   //in case no difference is found
+            write(STDERR_FILENO,"No differences found in the snapshots!\n",
+                strlen("No differences found in the snapshots!\n"));
+        }
+
+        close(snapshot_fd_current);
+        close(snapshot_fd_prev);
+    }
+    closedir(d);
 }
 
 
@@ -227,14 +213,12 @@ void create_snapshot(char *path, char *output_path){
     char *dir_name=basename((char *)path);  //gets the name of the input directory
     char *output_dir_name=basename((char *)output_path); //gets the name of the output directory
 
-    DIR *dir_check=opendir(path); //checking if the directories given as arguments for monitoring   
+    DIR *dir_check=opendir(path); //checking if the directory given as argument for monitoring   
                                   //exist. If the path is incorrect the error message will be printed to stderr 
                                   //and it will be skipped
 
     if(dir_check==NULL){
-        write(STDERR_FILENO, "error: The directory \"", strlen("error: The directory \""));
-        write(STDERR_FILENO,dir_name,strlen(dir_name));
-        write(STDERR_FILENO,"\" does not exist!\n",strlen("\" does not exits!\n"));
+        write_message("error: Failed to open the input directory ",dir_name);
         return;
     }
     closedir(dir_check);
@@ -242,17 +226,14 @@ void create_snapshot(char *path, char *output_path){
     dir_check=opendir(output_path); //checking if the output directory given as argument exists. If the path is incorrect
                                     //the snapshots does not have a place to be stored so the program exits.
     if(dir_check==NULL){
-        write(STDERR_FILENO, "error: The output directory \"", strlen("error: The output directory \""));
-        write(STDERR_FILENO,output_dir_name,strlen(output_dir_name));
-        write(STDERR_FILENO,"\" does not exist => Snapshots cannot be saved! => Exiting Program!\n",
-            strlen("\" does not exist => Snapshots cannot be saved! => Exiting Program!\n"));
+        write_message("error: Failed to open the output directory ",output_dir_name);
         exit(EXIT_FAILURE);
     }
     closedir(dir_check); 
 
     char snapshot_file_name[FILENAME_MAX];
     int snapshots_no=count_snapshots(output_path,dir_name); // --> calls the function and gets the no. of existing snapshots 
-                                                         // (starts counting from 0)
+                                                            // (starts counting from 0)
     time_t now;                                         
     struct tm *timestamp;  
     char timestamp_str[32];
@@ -266,19 +247,14 @@ void create_snapshot(char *path, char *output_path){
   
     int snapshot_fd = open(snapshot_file_name, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR); 
     if(snapshot_fd == -1){
-        write(STDERR_FILENO, "error: Failed to open the snapshot file for \"",
-            strlen("error: Failed to open the snapshot file for \""));
-        write(STDERR_FILENO,dir_name,strlen(dir_name));
-        write(STDERR_FILENO,"\"\n",strlen("\"\n"));
+        write_message("error: Failed to open the snapshot file for ",dir_name);
         return;
     }
 
     read_directories(path, snapshot_fd);
 
     if(snapshot_fd != -1){ 
-        write(STDERR_FILENO, "Snapshot created successfully for \"", strlen("Snapshot created successfully for \""));
-        write(STDERR_FILENO,dir_name,strlen(dir_name));
-        write(STDERR_FILENO,"\"\n",strlen("\"\n"));
+        write_message("Snapshot created successfully for ",dir_name);
     }
 
     // (MAYBE AN EXECUTION TIME TO SEE HOW MUCH IT TAKES OR AN PROGRESSION BAR IN THE FUTURE)
@@ -293,7 +269,7 @@ int main(int argc, char *argv[]){
     if(argc < 4){ // minimum 4 arguments because now I need "-o" and the output directory,
                   // the ./a.out and the rest of the paths to directories that will be monitored
         write(STDERR_FILENO, "error: Not enough arguments! => Exiting program!\n",
-            strlen("error: Not enough arguments! => Exiting program!\n"));
+          strlen("error: Not enough arguments! => Exiting program!\n"));
         exit(EXIT_FAILURE);
     }
     else{
@@ -308,17 +284,17 @@ int main(int argc, char *argv[]){
             }
             if(o_count<1 && i+1==argc){
                     write(STDERR_FILENO,"error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n",
-                        strlen("error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n"));
+                      strlen("error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n"));
                     exit(EXIT_FAILURE);
             }
             if(o_count>1){
                     write(STDERR_FILENO,"error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n", 
-                        strlen("error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n"));
+                      strlen("error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n"));
                     exit(EXIT_FAILURE);
             }
             if(strcmp(argv[i],"-o")==0 && i+1==argc){
                 write(STDERR_FILENO,"error: \"-o\" cannot be the last argument! => Exiting program!\n", 
-                    strlen("error: \"-o\" cannot be the last argument! => Exiting program!\n"));
+                  strlen("error: \"-o\" cannot be the last argument! => Exiting program!\n"));
                 exit(EXIT_FAILURE);
             }
         }
