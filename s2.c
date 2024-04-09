@@ -45,7 +45,7 @@ void create_snapshot(char *path, char *output_path);
 //from the output directory. If no snapshot is found for one of the directories, it will return 0
 int count_snapshots(const char *output_path,const char *dir_name);
 
-//searches in the output directory all the entries for the an monitored directory and calls 
+//searches in the output directory all the snapshots that starts with the same directory name and calls 
 //the compare_snapshots function if two snapshots are found. If there is only one, no comparation is made
 void get_previous_snapshot(const char *output_path, const char *dir_name,const char *snapshot_file_name, int snp_no);
 
@@ -158,10 +158,17 @@ void create_snapshot(char *path, char *output_path){
         return;
     }
 
+    clock_t start_1=clock();  //getting the cpu time used for the read_directories function
     read_directories(path, snapshot_fd);
+    clock_t end_1=clock();
+
+    double time_1=(double)(end_1-start_1)/CLOCKS_PER_SEC;  
+    char time_str_1[20];                                    //converting the time to string
+    sprintf(time_str_1,"--> created in %g (s)\n",time_1);   
 
     if(snapshot_fd != -1){ 
         write_message("Snapshot created successfully for ",dir_name);
+        write(STDERR_FILENO,time_str_1,strlen(time_str_1));
     }
 
     // (MAYBE AN EXECUTION TIME TO SEE HOW MUCH IT TAKES OR AN PROGRESSION BAR IN THE FUTURE)
@@ -229,14 +236,14 @@ void get_previous_snapshot(const char *output_path, const char *dir_name,const c
         }
     
         if(prev_snapshot_no<1){  //if in the folder is not a previous snapshot => no comparison will be made
-            write_message("--> no snapshots were previously created for ",dir_name);
+            write_message("No snapshots were previously created for ",dir_name);
         }
         else{
             compare_snapshots(prev_snapshot_file_name,snapshot_file_name,dir_name);
         }
     }
     else{
-        write_message("*compare_snapshots* error: Failed to open the output directory ",dir_name);
+        write_message("*get_prev_snapshot* error: Failed to open the output directory ",dir_name);
     }
     closedir(d);
 }
@@ -246,6 +253,8 @@ void get_previous_snapshot(const char *output_path, const char *dir_name,const c
     COMPARE SNAPSHOTS FUNCTION IMPLEMENTATION
 */
 void compare_snapshots(const char *prev_snapshot_file_name,const char *snapshot_file_name,const char *dir_name){
+
+    int comparing=1;
 
     int snapshot_fd_current = open(snapshot_file_name, O_RDONLY, S_IRUSR); //opening the current snapshot file in reading mode
     if(snapshot_fd_current == -1){
@@ -262,46 +271,53 @@ void compare_snapshots(const char *prev_snapshot_file_name,const char *snapshot_
 
     char current_line[256];  //will store the lines into these two bubffers
     char prev_line[256];
+
     int line=1;
+    char line_str[20];
+
     int IsDifferent=0;
 
-    while(1){
+    while(comparing){
 
         ssize_t current_read=read(snapshot_fd_current, current_line, sizeof(current_line)-1); //reading data from the snapshot 
         ssize_t prev_read=read(snapshot_fd_prev, prev_line, sizeof(prev_line)-1);             //file descriptors into the buffers 
 
         if(current_read==0 && prev_read==0){ //files reached EOF
+            comparing=0;
             break;
         }
         if(current_read==0 || prev_read==0){ //if one of the files has less lines
-                                                 // => the files are different
+                                             // => the files are different
         if(current_read==0){
             lseek(snapshot_fd_current, -prev_read, SEEK_CUR);  //positions the file pointer at the beginning of the line
                                                                // in the prev snapshot
                 while(read(snapshot_fd_prev, prev_line, sizeof(prev_line)-1)>0){
                     write(snapshot_fd_current, prev_line, strlen(prev_line)); 
-                }                                                                     // --> write the lines of the fie that
-            } else {                                                                      // has more in the prev snapshot
+                }                                                                   // --> writes the lines of the file that
+            } else {                                                                // has more lines in the prev snapshot
                 while(read(snapshot_fd_current, current_line, sizeof(current_line)-1)>0){
                     write(snapshot_fd_prev, current_line, strlen(current_line));
                 }
-            }               //REVENIM CU DOUA BUFERE 
+            }        
             IsDifferent=1;
         }
 
         if(strcmp(current_line, prev_line)!=0){   //if the current lines are not equal => files are diff
-                                                  // --> will override the previous snapshot
+            sprintf(line_str,"%d",line);          // --> will override the previous snapshot
             lseek(snapshot_fd_prev, -prev_read, SEEK_CUR);  //
             write(snapshot_fd_prev, current_line, strlen(current_line)); //writing in the previous snapshot
             IsDifferent = 1;                                             //the line from the current snapshot
         }
-
         line++;
     }
 
     if(!IsDifferent){   //in case no difference is found
-        write(STDERR_FILENO,"No differences found in the snapshots!\n",
-          strlen("No differences found in the snapshots!\n"));
+        write(STDERR_FILENO,"No differences found between this snapshot and the previous one!\n",
+          strlen("No differences found between this snapshot and the previous one!\n"));
+    }
+    else{
+        write_message("Differences found between this snapshot and the previous one at the line ",line_str);
+        write_message("Overriding the previous snapshot: ",basename((char*)prev_snapshot_file_name));
     }
 
     close(snapshot_fd_current);
@@ -337,15 +353,15 @@ int main(int argc, char *argv[]){
                 o_count++;
                 output_path=argv[i+1];
             }
-            if(o_count<1 && i+1==argc){
-                    write(STDERR_FILENO,"error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n",
-                      strlen("error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n"));
-                    exit(EXIT_FAILURE);
+            if(o_count<1 && i+1==argc){   
+                write(STDERR_FILENO,"error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n",
+                  strlen("error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n"));
+                exit(EXIT_FAILURE);
             }
-            if(o_count>1){
-                    write(STDERR_FILENO,"error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n", 
-                      strlen("error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n"));
-                    exit(EXIT_FAILURE);
+            if(o_count>1){  
+                write(STDERR_FILENO,"error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n", 
+                  strlen("error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n"));
+                exit(EXIT_FAILURE);
             }
             if(strcmp(argv[i],"-o")==0 && i+1==argc){
                 write(STDERR_FILENO,"error: \"-o\" cannot be the last argument! => Exiting program!\n", 
@@ -355,15 +371,15 @@ int main(int argc, char *argv[]){
         }
 
         for(int i=1;i<argc;i++){  //parsing again through all the argument
-                if(strcmp(argv[i],"-o")==0 && i+1<argc){ //basically if the argument is "-o" then the next one
-                                                         //is the output directory so we skip it
-                    i++;
-                }
-                else{
-                    write(STDERR_FILENO,"\n",1);
-                    char *path = argv[i];                //the rest of the arguments are directories
-                    create_snapshot(path,output_path);   //that are monotored
-                }
+            if(strcmp(argv[i],"-o")==0 && i+1<argc){ //basically if the argument is "-o" then the next one
+                                                     //is the output directory so we skip it
+                i++;
+            }
+            else{
+                write(STDERR_FILENO,"\n\n",2);
+                char *path = argv[i];                //the rest of the arguments are directories
+                create_snapshot(path,output_path);   //that are monotored
+            }
         }
     }
     write(STDERR_FILENO,"\n",1);
