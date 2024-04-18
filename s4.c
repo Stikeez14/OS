@@ -1,22 +1,3 @@
-//S1 Description: The proposed project combines functionalities for monitoring a directory to manage 
-//differences between two captures (snapshots) of it. The user will be able to observe and intervene 
-//in the changes in the monitored directory.
-//Directory Monitoring: The user can specify the directory to be monitored as an argument in the command 
-//line, and the program will track changes occurring in it and its subdirectories, parsing recursively each 
-//entry from the directory. With each run of the program, the snapshot of the directory will be updated, 
-//storing the metadata of each entry.
-
-//S2: Description: The functionality of the program will be updated to allow it to receive an unspecified number of 
-//arguments (directories) in the command line. The logic for capturing metadata will now apply to all received 
-//arguments, meaning the program will update snapshots for all directories specified by the user.
-//For each entry of each directory provided as an argument, the user will be able to compare the previous snapshot 
-//of the specified directory with the current one. If there are differences between the two snapshots, the old
-//snapshot will be updated with the new information from the current snapshot.
-//The functionality of the code will be expanded so that the program receives an additional argument, representing 
-//the output directory where all snapshots of entries from the specified directories in the command line will be stored. 
-//This output directory will be specified using the `-o` option. For example, the command to run the program will be: 
-//  `./program_exe -o output input1 input2 ...`.
-
 #include <stdio.h>
 #include <string.h>
 #include <dirent.h>
@@ -48,9 +29,6 @@ void create_snapshot(char *path, char *output_path);
 //the compare_snapshots function if two snapshots are found. If there is only one, no comparation is made
 void get_previous_snapshot(const char *output_path, const char *dir_name, const char *snapshot_file_name);
 
-//used mostly for error handling and printing messages
-void write_message(const char *message, const char* dir_name);
-
 //compares the snapshot that is created when the program runs, with the snapshot that was previously created
 //then overrides the previous snapshot with the information of the current one
 void compare_snapshots(const char *prev_snapshot_file_name, const char *snapshot_file_name, const char *dir_name);
@@ -76,8 +54,8 @@ void read_directories(const char *path, int snapshot_fd){
             if(strcmp(dir_entry->d_name, ".") == 0 || strcmp(dir_entry->d_name, "..") == 0)  continue;  
  
             entries_path=realloc(entries_path, strlen(path) + strlen(dir_entry->d_name) +2); //+2 is for '/' and null terminator
-            if(entries_path == NULL){         
-                write_message("*read_directories* error: Failed to allocate memory for path ", path);   
+            if(entries_path == NULL){          
+                fprintf(stderr, "*read_directories* error: Failed to allocate memory for path: %s\n", path);
                 //if the allocation of memory fails, after the printed error
                 //the loop will break => the directory will not be monitored anymore 
                 free(entries_path);       
@@ -87,7 +65,7 @@ void read_directories(const char *path, int snapshot_fd){
 
             struct stat st;                        //get file information with lstat      
             if(lstat(entries_path, &st) == -1){    //& print error message in case of failing     
-                write_message("*read_directories* error: Failed to get information for ", dir_entry->d_name);  
+                fprintf(stderr, "*read_directories* error: Failed to get information for path: %s\n", dir_entry->d_name);  
                 free(entries_path);                                      
                 break;   
             }
@@ -98,7 +76,7 @@ void read_directories(const char *path, int snapshot_fd){
             //reallocating memory for file_info then write in it entries_path & some additional data
             file_info=realloc(file_info, (data_length+1)); // +1 is for the null terminator
             if(file_info == NULL){
-                write_message("*read_directories* error: Failed to allocate memory for entry ", dir_entry->d_name);
+                fprintf(stderr, "*read_directories* error: Failed to allocate memory for entry: %s\n", dir_entry->d_name);
                 free(file_info);
                 break;
             }
@@ -119,7 +97,7 @@ void read_directories(const char *path, int snapshot_fd){
         closedir(d);
     }
     else{
-        write_message("*read_directories* error: Failed to open the directory ", dir_name);
+        fprintf(stderr, "*read_directories* error: Failed to open the directory: %s\n", dir_name);
         return;
     } 
 }
@@ -138,7 +116,7 @@ void create_snapshot(char *path, char *output_path){
                                   //and it will be skipped
 
     if(dir_check == NULL){
-        write_message("*create_snapshots* error: The provided directory for monitoring does not exist: ", dir_name);
+        fprintf(stderr, "*create_snapshots* error: The provided directory for monitoring does not exist:  %s\n", dir_name);
         return;
     }
     closedir(dir_check);
@@ -146,7 +124,7 @@ void create_snapshot(char *path, char *output_path){
     dir_check=opendir(output_path); //checking if the output directory given as argument exists. If the path is incorrect
                                     //the snapshots does not have a place to be stored so the program exits.
     if(dir_check == NULL){
-        write_message("*create_snapshots* error: The provided output directory does not exist: ", output_dir_name);
+        fprintf(stderr, "*create_snapshots* error: The provided output directory does not exist:  %s\n", output_dir_name);
         exit(EXIT_FAILURE);
     }
     closedir(dir_check); 
@@ -167,7 +145,7 @@ void create_snapshot(char *path, char *output_path){
   
     int snapshot_fd=open(snapshot_file_name, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR); 
     if(snapshot_fd == -1){
-        write_message("*create_snapshots* error: Failed to open the snapshot file for: ", dir_name);
+        fprintf(stderr, "*create_snapshots* error: Failed to open the snapshot file for:  %s\n", dir_name);
         return;
     }
 
@@ -176,12 +154,11 @@ void create_snapshot(char *path, char *output_path){
     clock_t end=clock();
 
     double time=(double)(end-start)/CLOCKS_PER_SEC;  
-    char time_str[40];                                    //converting the time to string
-    snprintf(time_str, sizeof(time_str), "-> Time required: %g (s)\n", time);   
+    char time_str[50];                                    //converting the time to string
+    snprintf(time_str, sizeof(time_str), "Snapshot created in %g (s) for: ", time);   
 
     if(snapshot_fd != -1){ 
-        write_message("Snapshot created successfully for: ", dir_name);
-        write(STDERR_FILENO,time_str, strlen(time_str));
+        fprintf(stderr, "Snapshot created successfully for: %s in %g (s)\n", dir_name, time);
     }
 
     close(snapshot_fd);
@@ -216,10 +193,10 @@ void get_previous_snapshot(const char *output_path, const char *dir_name,const c
         }
     
         //if in the folder is not a previous snapshot => no comparison will be made
-        if(prev_snapshot_no == 1) write_message("No snapshots were previously created for: ", dir_name);
+        if(prev_snapshot_no == 1) fprintf(stderr, "No snapshots were previously created for:  %s\n", dir_name);
         else compare_snapshots(prev_snapshot_file_name, snapshot_file_name, dir_name);
     }
-    else write_message("*get_prev_snapshot* error: Failed to open the output directory: ", dir_name);
+    else fprintf(stderr, "*get_prev_snapshot* error: Failed to open the output directory:  %s\n", dir_name);
     closedir(d);
 }
 
@@ -231,14 +208,14 @@ void compare_snapshots(const char *prev_snapshot_file_name, const char *current_
 
     int snapshot_fd_current=open(current_snapshot_file_name, O_RDONLY, S_IRUSR); //opening the current snapshot file in reading mode
     if(snapshot_fd_current == -1){
-        write_message("*compare_snapshots* error: Failed to open the current snapshot file for ", dir_name);
+        fprintf(stderr, "*compare_snapshots* error: Failed to open the current snapshot file for: %s\n", dir_name);
         return;
     }
 
     int snapshot_fd_prev=open(prev_snapshot_file_name, O_RDONLY, S_IRUSR); //opening the previous snapshot file in reading 
                                                                             //and writing mode
     if(snapshot_fd_prev == -1){
-        write_message("*compare_snapshots* error: Failed to open the previous snapshot file for ", dir_name);
+        fprintf(stderr, "*compare_snapshots* error: Failed to open the previous snapshot file for: %s\n", dir_name);
         return;
     }
 
@@ -264,12 +241,12 @@ void compare_snapshots(const char *prev_snapshot_file_name, const char *current_
     while(current_read > 0 && prev_read > 0);
 
     if(!IsDifferent){   //in case no difference is found
-        write(STDERR_FILENO,"No differences found between the current and the previous snapshot!\n", strlen("No differences found between the current and the previous snapshot!\n"));
+        fprintf(stderr, "No differences found between the current and the previous snapshot for: %s\n", dir_name);
         unlink(prev_snapshot_file_name); //deleting the previous snapshot file name
         
     }
     else{
-        write_message("Difference found between the current and the previous snapshot => overriding the previous snapshot: ", basename((char*)prev_snapshot_file_name));
+        fprintf(stderr, "Difference found between the current and the previous snapshot => overriding the previous snapshot for: %s\n", dir_name);
         unlink(prev_snapshot_file_name);  //deleting the previous snapshot file name
         rename(current_snapshot_file_name, prev_snapshot_file_name);  //renaming the current snapshot
     }
@@ -279,18 +256,10 @@ void compare_snapshots(const char *prev_snapshot_file_name, const char *current_
 }
 
 
-/*
-    WRITE MESSAGE FUNCTION IMPLEMENTATION
-*/
-void write_message(const char *message,const char* dir_name){
-    write(STDERR_FILENO,message, strlen(message));
-    write(STDERR_FILENO,dir_name, strlen(dir_name));
-    write(STDERR_FILENO,"\n",1);
-}
-
-
 int main(int argc, char *argv[]){
-    
+
+    write(STDERR_FILENO,"\n",1);
+
     if(argc<6){   // minimum 6 arguments because now I need "-o" and the output dir, "-s" and the isolated dir,
                   // the ./a.out and the rest of the paths to directories that will be monitored
         write(STDERR_FILENO, "error: Not enough arguments! => Exiting program!\n", strlen("error: Not enough arguments! => Exiting program!\n"));
@@ -311,11 +280,13 @@ int main(int argc, char *argv[]){
             s_count++;
             isolated_path=argv[i+1];
         }
+
         //checking if "-o" and "-s" arguments are consecutive
         if((strcmp(argv[i],"-o")==0 && i+1<argc && strcmp(argv[i+1],"-s")==0) || (strcmp(argv[i],"-s")==0 && i+1<argc && strcmp(argv[i+1],"-o")==0)){
             write(STDERR_FILENO, "error: Both \"-o\" and \"-s\" arguments cannot be provided consecutively! => Exiting program!\n", strlen("error: Both \"-o\" and \"-s\" arguments cannot be provided consecutively! => Exiting program!\n"));
             exit(EXIT_FAILURE);
         }
+
         //checking if argument "-o" or "-s" is not written in terminal
         if(o_count<1 && i+1==argc){  
             write(STDERR_FILENO,"error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n", strlen("error: The argument \"-o\" was not detected in the terminal! => Exiting program!\n"));
@@ -325,15 +296,17 @@ int main(int argc, char *argv[]){
             write(STDERR_FILENO,"error: The argument \"-s\" was not detected in the terminal! => Exiting program!\n", strlen("error: The argument \"-s\" was not detected in the terminal! => Exiting program!\n"));
             exit(EXIT_FAILURE);
         }
+
         //checking if argument "-o" or "-s" is more than once
         if(o_count>1){  
-           write(STDERR_FILENO,"error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n", strlen("error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n"));
+            write(STDERR_FILENO,"error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n", strlen("error: The argument \"-o\" was detected more than once in the terminal! => Exiting program!\n"));
             exit(EXIT_FAILURE);
         }
         if(s_count>1){  
             write(STDERR_FILENO,"error: The argument \"-s\" was detected more than once in the terminal! => Exiting program!\n", strlen("error: The argument \"-s\" was detected more than once in the terminal! => Exiting program!\n"));
             exit(EXIT_FAILURE);
         }
+
         //checking if argument "-o" or "-s" is the last argument
         if(strcmp(argv[i],"-o")==0 && i+1==argc){ 
             write(STDERR_FILENO,"error: \"-o\" cannot be the last argument! => Exiting program!\n", strlen("error: \"-o\" cannot be the last argument! => Exiting program!\n"));
@@ -362,7 +335,7 @@ int main(int argc, char *argv[]){
             if(pid == 0){
                 char *path = argv[i];              
                 create_snapshot(path,output_path);   
-                fprintf(stderr,"Child process %d terminated with PID %d and exit code %d\n", count_processes, getpid(), pid);
+                fprintf(stderr,"Child process %d terminated with PID %d and exit code %d for: %s \n", count_processes, getpid(), pid, basename((char *)path));
                 return EXIT_SUCCESS;
             }
             else if(pid < 0){
@@ -375,7 +348,7 @@ int main(int argc, char *argv[]){
     for(int i=1;i<argc;i++){ 
         if((strcmp(argv[i],"-o")==0 && i+1<argc) || (strcmp(argv[i],"-s")==0 && i+1<argc)) i++;
         else{
-            write(STDERR_FILENO,"\n",1);
+            //write(STDERR_FILENO,"\n",1);
             wait(NULL);
         }
     }
