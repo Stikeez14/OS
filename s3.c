@@ -176,8 +176,8 @@ void create_snapshot(char *path, char *output_path){
     clock_t end=clock();
 
     double time=(double)(end-start)/CLOCKS_PER_SEC;  
-    char time_str[35];                                    //converting the time to string
-    snprintf(time_str, sizeof(time_str), "--> created in %g (s)\n", time);   
+    char time_str[40];                                    //converting the time to string
+    snprintf(time_str, sizeof(time_str), "-> time required: %g (s)\n", time);   
 
     if(snapshot_fd != -1){ 
         write_message("Snapshot created successfully for: ", dir_name);
@@ -258,7 +258,6 @@ void compare_snapshots(const char *prev_snapshot_file_name, const char *current_
 
         if((current_read!=prev_read) || strcmp(current_line, prev_line)!=0){
             IsDifferent=1;
-            write(STDERR_FILENO,"Difference found between the snapshots\n", strlen("Difference found between the snapshots\n"));
             break;
         }
     }
@@ -270,7 +269,7 @@ void compare_snapshots(const char *prev_snapshot_file_name, const char *current_
         
     }
     else{
-        write_message("Overriding the previous snapshot: ", basename((char*)prev_snapshot_file_name));
+        write_message("Difference found between the snapshots. Overriding the previous snapshot: ", basename((char*)prev_snapshot_file_name));
         unlink(prev_snapshot_file_name);  //deleting the previous snapshot file name
         rename(current_snapshot_file_name, prev_snapshot_file_name);  //renaming the current snapshot
     }
@@ -321,21 +320,40 @@ int main(int argc, char *argv[]){
         }
     }
 
+    pid_t pid;
+    int count=0;
+
     //parsing again through all the argument
     for(int i=1;i<argc;i++){  
-        if(strcmp(argv[i],"-o")==0 && i+1<argc){ //basically if the argument is "-o" then the next one
-                                                 //is the output directory so we skip it
-            i++;
+
+        //basically if the argument is "-o" then the next one is the output directory so we skip it
+        if(strcmp(argv[i],"-o")==0 && i+1<argc)   i++; 
+       
+        else{ //the rest of the arguments are directories that are monitored
+            pid=fork();
+            count++;
+
+            if(pid == 0){
+                char *path = argv[i];              
+                create_snapshot(path,output_path);   
+                fprintf(stderr,"Child process %d terminated with PID %d and exit code %d\n", count, getpid(), pid);
+                return EXIT_SUCCESS;
+            }
+            else if(pid < 0){
+                write(STDERR_FILENO,"error: fork() failed!\n",strlen("error: fork() failed!\n"));
+                return EXIT_FAILURE;
+            }
         }
-        //pid_t childPid;
-        //childPid=fork();
-        //if(childPid==0){
-            write(STDERR_FILENO,"\n",1);
-            char *path = argv[i];                //the rest of the arguments are directories
-            create_snapshot(path,output_path);   //that are monitored
-          //  return EXIT_SUCCESS;
-        //}
     }
+
+    for(int i=1;i<argc;i++){
+        if(strcmp(argv[i],"-o")==0 && i+1<argc) i++;
+        else{
+            write(STDERR_FILENO,"\n",1);
+            wait(NULL);
+        }
+    }
+
     write(STDERR_FILENO,"\n",1);
     return EXIT_SUCCESS;
 }
