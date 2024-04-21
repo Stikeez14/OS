@@ -19,7 +19,7 @@
 
 //traverse the directory given as argument and his sub_directories recursively
 //and writes in the snapshot file the path and the name of each entry 
-void read_directories(const char *path, int snapshot_fd);
+void read_directories(const char *path, int snapshot_fd, const char *dir_name);
 
 //creates a snapshot file in the output directory for each 
 //directory given as argument in the terminal for monitoring.
@@ -34,13 +34,16 @@ void get_previous_snapshot(const char *output_path, const char *dir_name, const 
 void compare_snapshots(const char *prev_snapshot_file_name, const char *snapshot_file_name, const char *dir_name);
 
 //checks if a directory entry has all permissions missing
-void check_permissions(const char *dir_entry, struct stat permissions);
+void check_permissions(const char *dir_entry, struct stat permissions, const char *dir_name);
+
+//performs syntactic analysis for the files that has all permissions missing using the verify_for_malicious script 
+void analyze_file(const char *dir_entry, const char *dir_name);
 
 
 /*
     READ DIRECTORIES FUNCTION IMPLEMENTATION
 */
-void read_directories(const char *path, int snapshot_fd){
+void read_directories(const char *path, int snapshot_fd, const char *dir_name){
 
     DIR *d = opendir(path);
     struct dirent *dir_entry;
@@ -48,7 +51,7 @@ void read_directories(const char *path, int snapshot_fd){
     char *entries_path=NULL; //storing the path and name of each directory entry
     char *file_info=NULL;  //storing information for each directory entry
 
-    char *dir_name=basename((char*)path); //from libgen, used for getting the name of the input directory
+    char *current_dir_name=basename((char*)path); //from libgen, used for getting the name of the input directory
 
     if(d){
         while((dir_entry = readdir(d)) != NULL){
@@ -58,7 +61,7 @@ void read_directories(const char *path, int snapshot_fd){
  
             entries_path=realloc(entries_path, strlen(path) + strlen(dir_entry->d_name) +2); //+2 is for '/' and null terminator
             if(entries_path == NULL){          
-                fprintf(stderr, "*read_directories* error: Failed to allocate memory for path: %s\n", path);
+                fprintf(stderr, "*read_directories* error: Failed to allocate memory for path  \"%s\"\n", path);
                 //if the allocation of memory fails, after the printed error
                 //the loop will break => the directory will not be monitored anymore 
                 free(entries_path);       
@@ -68,11 +71,11 @@ void read_directories(const char *path, int snapshot_fd){
 
             struct stat st;                        //get file information with lstat      
             if(lstat(entries_path, &st) == -1){    //& print error message in case of failing     
-                fprintf(stderr, "*read_directories* error: Failed to get information for path: %s\n", dir_entry->d_name);  
+                fprintf(stderr, "*read_directories* error: Failed to get information for path  \"%s\"\n", dir_entry->d_name);  
                 free(entries_path);                                      
                 break;   
             }
-            else check_permissions(entries_path,st);
+            else check_permissions(entries_path,st, dir_name);
             
             
             //gets the actual size of each line & used for reallocaating memory 
@@ -81,7 +84,7 @@ void read_directories(const char *path, int snapshot_fd){
             //reallocating memory for file_info then write in it entries_path & some additional data
             file_info=realloc(file_info, (data_length+1)); // +1 is for the null terminator
             if(file_info == NULL){
-                fprintf(stderr, "*read_directories* error: Failed to allocate memory for entry: %s\n", dir_entry->d_name);
+                fprintf(stderr, "*read_directories* error: Failed to allocate memory for entry  \"%s\"\n", dir_entry->d_name);
                 free(file_info);
                 break;
             }
@@ -94,7 +97,7 @@ void read_directories(const char *path, int snapshot_fd){
 
             //if an entry is a directory => recursively call again the function with the new path  
             if(S_ISDIR(st.st_mode)){       
-                read_directories(entries_path, snapshot_fd);
+                read_directories(entries_path, snapshot_fd, dir_name);
             }
         }
         free(entries_path);
@@ -102,7 +105,7 @@ void read_directories(const char *path, int snapshot_fd){
         closedir(d);
     }
     else{
-        fprintf(stderr, "*read_directories* error: Failed to open the directory: %s\n", dir_name);
+        fprintf(stderr, "*read_directories* error: Failed to open the directory  \"%s\"\n", current_dir_name);
         return;
     } 
 }
@@ -114,14 +117,13 @@ void read_directories(const char *path, int snapshot_fd){
 void create_snapshot(char *path, char *output_path){
 
     char *dir_name=basename((char *)path);  //gets the name of the input directory
-    //char *output_dir_name=basename((char *)output_path); //gets the name of the output directory
 
     DIR *dir_check=opendir(path); //checking if the directory given as argument for monitoring   
                                   //exist. If the path is incorrect the error message will be printed to stderr 
                                   //and it will be skipped
 
     if(dir_check == NULL){
-        fprintf(stderr, "*create_snapshots* error: The provided directory for monitoring does not exist:  %s\n", dir_name);
+        fprintf(stderr, "*create_snapshots* error: The provided directory for monitoring does not exist  \"%s\"\n", dir_name);
         return;
     }
     closedir(dir_check);
@@ -149,20 +151,18 @@ void create_snapshot(char *path, char *output_path){
   
     int snapshot_fd=open(snapshot_file_name, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR); 
     if(snapshot_fd == -1){
-        fprintf(stderr, "*create_snapshots* error: Failed to open the snapshot file for:  %s\n", dir_name);
+        fprintf(stderr, "*create_snapshots* error: Failed to open the snapshot file for  \"%s\"\n", dir_name);
         return;
     }
 
     clock_t start=clock();  //getting the cpu time used for the read_directories function
-    read_directories(path, snapshot_fd);
+    read_directories(path, snapshot_fd, dir_name);
     clock_t end=clock();
 
     double time=(double)(end-start)/CLOCKS_PER_SEC;  
-    char time_str[50];                                    //converting the time to string
-    snprintf(time_str, sizeof(time_str), "Snapshot created in %g (s) for: ", time);   
-
+   
     if(snapshot_fd != -1){ 
-        fprintf(stderr, "Snapshot created successfully for: %s in %g (s)\n", dir_name, time);
+        fprintf(stderr, "(Creating) Snapshot created successfully for  \"%s\"  in %g (s)\n", dir_name, time);
     }
 
     close(snapshot_fd);
@@ -197,10 +197,10 @@ void get_previous_snapshot(const char *output_path, const char *dir_name,const c
         }
     
         //if in the folder is not a previous snapshot => no comparison will be made
-        if(prev_snapshot_no == 1) fprintf(stderr, "No snapshots were previously created for:  %s\n", dir_name);
+        if(prev_snapshot_no == 1) fprintf(stderr, "No snapshots were previously created for  \"%s\"\n", dir_name);
         else compare_snapshots(prev_snapshot_file_name, snapshot_file_name, dir_name);
     }
-    else fprintf(stderr, "*get_prev_snapshot* error: Failed to open the output directory:  %s\n", dir_name);
+    else fprintf(stderr, "*get_prev_snapshot* error: Failed to open the output directory  \"%s\"\n", dir_name);
     closedir(d);
 }
 
@@ -212,14 +212,14 @@ void compare_snapshots(const char *prev_snapshot_file_name, const char *current_
 
     int snapshot_fd_current=open(current_snapshot_file_name, O_RDONLY, S_IRUSR); //opening the current snapshot file in reading mode
     if(snapshot_fd_current == -1){
-        fprintf(stderr, "*compare_snapshots* error: Failed to open the current snapshot file for: %s\n", dir_name);
+        fprintf(stderr, "*compare_snapshots* error: Failed to open the current snapshot file for  \"%s\"\n", dir_name);
         return;
     }
 
     int snapshot_fd_prev=open(prev_snapshot_file_name, O_RDONLY, S_IRUSR); //opening the previous snapshot file in reading 
                                                                             //and writing mode
     if(snapshot_fd_prev == -1){
-        fprintf(stderr, "*compare_snapshots* error: Failed to open the previous snapshot file for: %s\n", dir_name);
+        fprintf(stderr, "*compare_snapshots* error: Failed to open the previous snapshot file for  \"%s\"\n", dir_name);
         return;
     }
 
@@ -245,12 +245,12 @@ void compare_snapshots(const char *prev_snapshot_file_name, const char *current_
     while(current_read > 0 && prev_read > 0);
 
     if(!IsDifferent){   //in case no difference is found
-        fprintf(stderr, "No differences found between the current and the previous snapshot for: %s\n", dir_name);
+        fprintf(stderr, "(Comparing) No differences found between the current and the previous snapshot for  \"%s\"\n", dir_name);
         unlink(prev_snapshot_file_name); //deleting the previous snapshot file name
         
     }
     else{
-        fprintf(stderr, "Difference found between the current and the previous snapshot => overriding the previous snapshot for: %s\n", dir_name);
+        fprintf(stderr, "(Comparing) Difference found between the current and the previous snapshot => Overriding the previous snapshot for  \"%s\"\n", dir_name);
         unlink(prev_snapshot_file_name);  //deleting the previous snapshot file name
         rename(current_snapshot_file_name, prev_snapshot_file_name);  //renaming the current snapshot
     }
@@ -263,7 +263,8 @@ void compare_snapshots(const char *prev_snapshot_file_name, const char *current_
 /*
     CHECK PERMISSIONS FUNCTION IMPLEMENTATION
 */
-void check_permissions(const char *dir_entry, struct stat permissions){
+void check_permissions(const char *dir_entry, struct stat permissions, const char *dir_name){
+
     if(!(permissions.st_mode & S_IXUSR) && 
     !(permissions.st_mode & S_IRUSR) && 
     !(permissions.st_mode & S_IWUSR) && 
@@ -273,8 +274,29 @@ void check_permissions(const char *dir_entry, struct stat permissions){
     !(permissions.st_mode & S_IROTH) && 
     !(permissions.st_mode & S_IWOTH) && 
     !(permissions.st_mode & S_IXOTH)){
-        fprintf(stderr,"%s has no acces rights\n",dir_entry);
+
+        fprintf(stderr,"(Checking Permissions) \"%s\" from \"%s\" has no access rights => Performing Syntactic Anaysis!\n", basename((char *)dir_entry), dir_name);
+        analyze_file(dir_entry,dir_name);
     }
+}
+
+void analyze_file(const char *dir_entry, const char *dir_name){
+
+    int result=chmod(dir_entry, S_IRUSR | S_IRGRP | S_IROTH);
+
+    char argument[100]; 
+    snprintf(argument, sizeof(argument), "./verify_for_malicious.sh %s", dir_entry);
+    
+    int file_status = system(argument);
+    if (file_status != 0) {
+        fprintf(stderr, "(Syntactic Analysis) \"%s\" from \"%s\" is potentially malicious or corrupted.\n", basename((char *)dir_entry), dir_name);
+    } else fprintf(stderr, "(Syntactic Analysis) \"%s\" from \"%s\" is safe.\n", basename((char *)dir_entry), dir_name);
+
+    result = chmod(dir_entry, 0 | 0 | 0 );
+    close(result);
+        
+    write(STDERR_FILENO,"\n",1);
+
 }
 
 
@@ -357,7 +379,7 @@ int main(int argc, char *argv[]){
             if(pid == 0){
                 char *path = argv[i];              
                 create_snapshot(path,output_path);   
-                fprintf(stderr,"Child process %d terminated with PID %d and exit code %d for: %s \n", count_processes, getpid(), pid, basename((char *)path));
+                fprintf(stderr,"Child process %d terminated with PID %d and exit code %d for  \"%s\"\n", count_processes, getpid(), pid, basename((char *)path));
                 return EXIT_SUCCESS;
             }
             else if(pid < 0){
