@@ -33,6 +33,9 @@ void get_previous_snapshot(const char *output_path, const char *dir_name, const 
 //then overrides the previous snapshot with the information of the current one
 void compare_snapshots(const char *prev_snapshot_file_name, const char *snapshot_file_name, const char *dir_name);
 
+//checks if a directory entry has all permissions missing
+void check_permissions(const char *dir_entry, struct stat permissions);
+
 
 /*
     READ DIRECTORIES FUNCTION IMPLEMENTATION
@@ -69,9 +72,11 @@ void read_directories(const char *path, int snapshot_fd){
                 free(entries_path);                                      
                 break;   
             }
+            else check_permissions(entries_path,st);
+            
             
             //gets the actual size of each line & used for reallocaating memory 
-            size_t data_length = snprintf(NULL, 0, "Path: %s\nSize: %ld bytes\nMode: %o\nHard Links: %ld\nUser ID: %d\nGroup ID: %d\n",  entries_path, st.st_size, st.st_mode, st.st_nlink, st.st_uid, st.st_gid);
+            size_t data_length = snprintf(NULL, 0, "Path: %s\nSize: %ld bytes\nAccess Rights: %c%c%c %c%c%c %c%c%c\nHard Links: %ld\n", entries_path, st.st_size, (st.st_mode & S_IRUSR) ? 'r' : '-', (st.st_mode & S_IWUSR) ? 'w' : '-', (st.st_mode & S_IXUSR) ? 'x' : '-', (st.st_mode & S_IRGRP) ? 'r' : '-', (st.st_mode & S_IWGRP) ? 'w' : '-', (st.st_mode & S_IXGRP) ? 'x' : '-' , (st.st_mode & S_IROTH) ? 'r' : '-', (st.st_mode & S_IWOTH) ? 'w' : '-', (st.st_mode & S_IXOTH) ? 'x' : '-', st.st_nlink);
 
             //reallocating memory for file_info then write in it entries_path & some additional data
             file_info=realloc(file_info, (data_length+1)); // +1 is for the null terminator
@@ -81,7 +86,7 @@ void read_directories(const char *path, int snapshot_fd){
                 break;
             }
 
-            sprintf(file_info, "Path: %s\nSize: %ld bytes\nMode: %o\nHard links: %ld\nUser ID: %d\nGroup ID: %d\n", entries_path, st.st_size, st.st_mode, st.st_nlink, st.st_uid, st.st_gid);
+            sprintf(file_info, "Path: %s\nSize: %ld bytes\nAccess Rights: %c%c%c %c%c%c %c%c%c\nHard Links: %ld\n", entries_path, st.st_size, (st.st_mode & S_IRUSR) ? 'r' : '-', (st.st_mode & S_IWUSR)? 'w' : '-', (st.st_mode & S_IXUSR) ? 'x' : '-', (st.st_mode & S_IRGRP) ? 'r' : '-', (st.st_mode & S_IWGRP) ? 'w' : '-', (st.st_mode & S_IXGRP) ? 'x' : '-' ,(st.st_mode & S_IROTH) ? 'r' : '-', (st.st_mode & S_IWOTH) ? 'w' : '-', (st.st_mode & S_IXOTH) ? 'x' : '-', st.st_nlink);
 
             //writing to the snapshot file the file_info & "\n" after each line
             write(snapshot_fd, file_info, strlen(file_info));                                               
@@ -109,7 +114,7 @@ void read_directories(const char *path, int snapshot_fd){
 void create_snapshot(char *path, char *output_path){
 
     char *dir_name=basename((char *)path);  //gets the name of the input directory
-    char *output_dir_name=basename((char *)output_path); //gets the name of the output directory
+    //char *output_dir_name=basename((char *)output_path); //gets the name of the output directory
 
     DIR *dir_check=opendir(path); //checking if the directory given as argument for monitoring   
                                   //exist. If the path is incorrect the error message will be printed to stderr 
@@ -121,11 +126,10 @@ void create_snapshot(char *path, char *output_path){
     }
     closedir(dir_check);
 
-    dir_check=opendir(output_path); //checking if the output directory given as argument exists. If the path is incorrect
-                                    //the snapshots does not have a place to be stored so the program exits.
+    dir_check=opendir(output_path); //checking if the output directory given as argument exists. 
+                                    //creating the output directory in case of non-existance
     if(dir_check == NULL){
-        fprintf(stderr, "*create_snapshots* error: The provided output directory does not exist:  %s\n", output_dir_name);
-        exit(EXIT_FAILURE);
+        mkdir(output_path,0777);
     }
     closedir(dir_check); 
 
@@ -257,10 +261,20 @@ void compare_snapshots(const char *prev_snapshot_file_name, const char *current_
 
 
 /*
-    FUNCTION IMPLEMENTATION
+    CHECK PERMISSIONS FUNCTION IMPLEMENTATION
 */
-void check_permissions(const char *dir_entry){
-    struct stat st;
+void check_permissions(const char *dir_entry, struct stat permissions){
+    if(!(permissions.st_mode & S_IXUSR) && 
+    !(permissions.st_mode & S_IRUSR) && 
+    !(permissions.st_mode & S_IWUSR) && 
+    !(permissions.st_mode & S_IRGRP) && 
+    !(permissions.st_mode & S_IWGRP) && 
+    !(permissions.st_mode & S_IXGRP) && 
+    !(permissions.st_mode & S_IROTH) && 
+    !(permissions.st_mode & S_IWOTH) && 
+    !(permissions.st_mode & S_IXOTH)){
+        fprintf(stderr,"%s has no acces rights\n",dir_entry);
+    }
 }
 
 
@@ -356,7 +370,7 @@ int main(int argc, char *argv[]){
     for(int i=1;i<argc;i++){ 
         if((strcmp(argv[i],"-o")==0 && i+1<argc) || (strcmp(argv[i],"-s")==0 && i+1<argc)) i++;
         else{
-            //write(STDERR_FILENO,"\n",1);
+            write(STDERR_FILENO,"\n",1);
             wait(NULL);
         }
     }
