@@ -19,11 +19,11 @@
 
 //traverse the directory given as argument and his sub_directories recursively
 //and writes in the snapshot file the path and the name of each entry 
-void read_directories(const char *path, int snapshot_fd, const char *dir_name);
+void read_directories(const char *path, int snapshot_fd, const char *dir_name, char *isolated_path);
 
 //creates a snapshot file in the output directory for each 
 //directory given as argument in the terminal for monitoring.
-void create_snapshot(char *path, char *output_path);
+void create_snapshot(char *path, char *output_path, char *isolated_path);
 
 //searches in the output directory all the snapshots that starts with the same directory name and calls 
 //the compare_snapshots function if two snapshots are found. If there is only one, no comparation is made
@@ -31,10 +31,10 @@ void get_previous_snapshot(const char *output_path, const char *dir_name, const 
 
 //compares the snapshot that is created when the program runs, with the snapshot that was previously created
 //then overrides the previous snapshot with the information of the current one
-void compare_snapshots(const char *prev_snapshot_file_name, const char *snapshot_file_name, const char *dir_name);
+void compare_snapshots(const char *prev_snapshot_file_name, const char *current_snapshot_file_name, const char *dir_name);
 
 //checks if a directory entry has all permissions missing
-void check_permissions(const char *dir_entry, struct stat permissions, const char *dir_name);
+void check_permissions(const char *dir_entry, struct stat permissions, const char *dir_name, char *isolated_path);
 
 //performs syntactic analysis for the files that has all permissions missing using the verify_for_malicious script 
 void analyze_file(const char *dir_entry, const char *dir_name);
@@ -43,7 +43,7 @@ void analyze_file(const char *dir_entry, const char *dir_name);
 /*
     READ DIRECTORIES FUNCTION IMPLEMENTATION
 */
-void read_directories(const char *path, int snapshot_fd, const char *dir_name){
+void read_directories(const char *path, int snapshot_fd, const char *dir_name, char *isolated_path){
 
     DIR *d = opendir(path);
     struct dirent *dir_entry;
@@ -75,7 +75,7 @@ void read_directories(const char *path, int snapshot_fd, const char *dir_name){
                 free(entries_path);                                      
                 break;   
             }
-            else check_permissions(entries_path,st, dir_name);
+            else check_permissions(entries_path,st, dir_name, isolated_path);
             
             
             //gets the actual size of each line & used for reallocaating memory 
@@ -97,7 +97,7 @@ void read_directories(const char *path, int snapshot_fd, const char *dir_name){
 
             //if an entry is a directory => recursively call again the function with the new path  
             if(S_ISDIR(st.st_mode)){       
-                read_directories(entries_path, snapshot_fd, dir_name);
+                read_directories(entries_path, snapshot_fd, dir_name, isolated_path);
             }
         }
         free(entries_path);
@@ -114,14 +114,13 @@ void read_directories(const char *path, int snapshot_fd, const char *dir_name){
 /*
     CREATE SNAPSHOT FUNCTION IMPLEMENTATION
 */
-void create_snapshot(char *path, char *output_path){
+void create_snapshot(char *path, char *output_path, char *isolated_path){
 
     char *dir_name=basename((char *)path);  //gets the name of the input directory
 
     DIR *dir_check=opendir(path); //checking if the directory given as argument for monitoring   
                                   //exist. If the path is incorrect the error message will be printed to stderr 
                                   //and it will be skipped
-
     if(dir_check == NULL){
         fprintf(stderr, "*create_snapshots* error: The provided directory for monitoring does not exist  \"%s\"\n", dir_name);
         return;
@@ -131,7 +130,7 @@ void create_snapshot(char *path, char *output_path){
     dir_check=opendir(output_path); //checking if the output directory given as argument exists. 
                                     //creating the output directory in case of non-existance
     if(dir_check == NULL){
-        mkdir(output_path,0777);
+        mkdir(output_path, 0777);
     }
     closedir(dir_check); 
 
@@ -156,7 +155,7 @@ void create_snapshot(char *path, char *output_path){
     }
 
     clock_t start=clock();  //getting the cpu time used for the read_directories function
-    read_directories(path, snapshot_fd, dir_name);
+    read_directories(path, snapshot_fd, dir_name, isolated_path);
     clock_t end=clock();
 
     double time=(double)(end-start)/CLOCKS_PER_SEC;  
@@ -263,40 +262,40 @@ void compare_snapshots(const char *prev_snapshot_file_name, const char *current_
 /*
     CHECK PERMISSIONS FUNCTION IMPLEMENTATION
 */
-void check_permissions(const char *dir_entry, struct stat permissions, const char *dir_name){
+void check_permissions(const char *dir_entry, struct stat permissions, const char *dir_name, char *isolated_path){
 
-    if(!(permissions.st_mode & S_IXUSR) && 
-    !(permissions.st_mode & S_IRUSR) && 
-    !(permissions.st_mode & S_IWUSR) && 
-    !(permissions.st_mode & S_IRGRP) && 
-    !(permissions.st_mode & S_IWGRP) && 
-    !(permissions.st_mode & S_IXGRP) && 
-    !(permissions.st_mode & S_IROTH) && 
-    !(permissions.st_mode & S_IWOTH) && 
-    !(permissions.st_mode & S_IXOTH)){
-
+    //checking if all the permissions are missing
+    if(!(permissions.st_mode & S_IXUSR) && !(permissions.st_mode & S_IRUSR) && 
+    !(permissions.st_mode & S_IWUSR) && !(permissions.st_mode & S_IRGRP) && 
+    !(permissions.st_mode & S_IWGRP) && !(permissions.st_mode & S_IXGRP) && 
+    !(permissions.st_mode & S_IROTH) && !(permissions.st_mode & S_IWOTH) && 
+    !(permissions.st_mode & S_IXOTH)){     //if all of them are missing => syntactic analysis will be perfomed
         fprintf(stderr,"(Checking Permissions) \"%s\" from \"%s\" has no access rights => Performing Syntactic Anaysis!\n", basename((char *)dir_entry), dir_name);
         analyze_file(dir_entry,dir_name);
+        strcat(isolated_path, basename((char *)dir_entry));  
+        rename(dir_entry,isolated_path); //moving the corrupted file to the isolated direvtory     
     }
 }
 
+
+/*
+    ANALYZE FILE FUNCTION IMPLEMENTATION
+*/
 void analyze_file(const char *dir_entry, const char *dir_name){
 
-    int result=chmod(dir_entry, S_IRUSR | S_IRGRP | S_IROTH);
+    int result=chmod(dir_entry, S_IRUSR); //giving read access rights to the "malicious file"
 
-    char argument[100]; 
+    char argument[100];  //making the command to run the script
     snprintf(argument, sizeof(argument), "./verify_for_malicious.sh %s", dir_entry);
     
-    int file_status = system(argument);
-    if (file_status != 0) {
-        fprintf(stderr, "(Syntactic Analysis) \"%s\" from \"%s\" is potentially malicious or corrupted.\n", basename((char *)dir_entry), dir_name);
-    } else fprintf(stderr, "(Syntactic Analysis) \"%s\" from \"%s\" is safe.\n", basename((char *)dir_entry), dir_name);
+    int file_status = system(argument); //executing the script
+    if(file_status != 0) fprintf(stderr, "(Syntactic Analysis) \"%s\" from \"%s\" is potentially malicious or corrupted.\n", basename((char *)dir_entry), dir_name);
+    else fprintf(stderr, "(Syntactic Analysis) \"%s\" from \"%s\" is safe.\n", basename((char *)dir_entry), dir_name);
 
-    result = chmod(dir_entry, 0 | 0 | 0 );
+    result = chmod(dir_entry, 0); //changing again the acces rights 
     close(result);
         
-    write(STDERR_FILENO,"\n",1);
-
+    write(STDERR_FILENO, "\n", 1);
 }
 
 
@@ -378,12 +377,12 @@ int main(int argc, char *argv[]){
 
             if(pid == 0){
                 char *path = argv[i];              
-                create_snapshot(path,output_path);   
+                create_snapshot(path, output_path, isolated_path);   
                 fprintf(stderr,"Child process %d terminated with PID %d and exit code %d for  \"%s\"\n", count_processes, getpid(), pid, basename((char *)path));
                 return EXIT_SUCCESS;
             }
             else if(pid < 0){
-                write(STDERR_FILENO,"error: fork() failed!\n",strlen("error: fork() failed!\n"));
+                write(STDERR_FILENO,"error: fork() failed!\n", strlen("error: fork() failed!\n"));
                 return EXIT_FAILURE;
             }
         }
