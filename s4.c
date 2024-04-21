@@ -256,6 +256,14 @@ void compare_snapshots(const char *prev_snapshot_file_name, const char *current_
 }
 
 
+/*
+    FUNCTION IMPLEMENTATION
+*/
+void check_permissions(const char *dir_entry){
+    struct stat st;
+}
+
+
 int main(int argc, char *argv[]){
 
     write(STDERR_FILENO,"\n",1);
