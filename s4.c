@@ -34,10 +34,12 @@ void get_previous_snapshot(const char *output_path, const char *dir_name, const 
 void compare_snapshots(const char *prev_snapshot_file_name, const char *current_snapshot_file_name, const char *dir_name);
 
 //checks if a directory entry has all permissions missing
+//takes from read_directories all the function arguments (dir_name is used only for printing)
 void check_permissions(const char *dir_entry, struct stat permissions, const char *dir_name, char *isolated_path, int snapshot_fd);
 
 //performs syntactic analysis for the files that has all permissions missing using the verify_for_malicious script 
-void analyze_file(const char *dir_entry, const char *dir_name);
+//takes dir_entry from check_permissions and performs the analysis (dir_name is used only for printing to stderr)
+int analyze_file(const char *dir_entry, const char *dir_name);
 
 
 /*
@@ -128,9 +130,16 @@ void create_snapshot(char *path, char *output_path, char *isolated_path){
     closedir(dir_check);
 
     dir_check=opendir(output_path); //checking if the output directory given as argument exists. 
-                                    //creating the output directory in case of non-existance
+                                    //creates the output directory in case of non-existance
     if(dir_check == NULL){
         mkdir(output_path, 0777);
+    }
+    closedir(dir_check); 
+
+    dir_check=opendir(isolated_path); //checking if the isolated directory given as argument exists. 
+                                      //creates the isolated directory in case of non-existance
+    if(dir_check == NULL){
+        mkdir(isolated_path, 0777);
     }
     closedir(dir_check); 
 
@@ -222,10 +231,10 @@ void compare_snapshots(const char *prev_snapshot_file_name, const char *current_
         return;
     }
 
-    char current_line[MAX_LINE];
-    char prev_line[MAX_LINE];
+    char current_line[MAX_LINE]; //buffers for storing the lines of the  
+    char prev_line[MAX_LINE];    //snapshots that are compared
 
-    int IsDifferent=0;
+    int IsDifferent=0; //flag
     
     ssize_t current_read, prev_read;
 
@@ -237,7 +246,7 @@ void compare_snapshots(const char *prev_snapshot_file_name, const char *current_
         prev_line[prev_read]='\0';
 
         if((current_read!=prev_read) || strcmp(current_line, prev_line)!=0){
-            IsDifferent=1;
+            IsDifferent=1;  
             break;
         }
     }
@@ -275,20 +284,23 @@ void check_permissions(const char *dir_entry, struct stat permissions, const cha
 
         fprintf(stderr,"(Checking Permissions) \"%s\" from \"%s\" has no access rights => Performing Syntactic Anaysis!\n", basename((char *)dir_entry), dir_name);
         
+        int file_status;
         pid2=fork();
 
         if(pid2 == 0){
             close(snapshot_fd);
-            analyze_file(dir_entry,dir_name);
-            strcat(isolated_path, basename((char *)dir_entry));  
-            rename(dir_entry, isolated_path); //moving the corrupted file to the isolated direvtory 
+            file_status=analyze_file(dir_entry,dir_name);
+            strcat(isolated_path, basename((char *)dir_entry));
+
+            if(file_status!=0) rename(dir_entry, isolated_path); //moving the corrupted file to the isolated direvtory 
             fprintf(stderr,"Child process terminated with PID %d and exit code %d for file  \"%s\"  from  \"%s\"\n", getpid(), pid2, basename((char *)dir_entry), dir_name);
             exit(EXIT_SUCCESS);    
         }
         else if(pid2 < 0){
-            write(STDERR_FILENO,"error: fork() failed!\n", strlen("error: fork() failed!\n"));
+            write(STDERR_FILENO,"*check_permissions* error: fork() for child failed!\n", strlen("*check_permissions* error: fork() for child failed!\n"));
         }
         wait(NULL);
+        write(STDERR_FILENO, "\n", 1);
     }
 }
 
@@ -296,9 +308,9 @@ void check_permissions(const char *dir_entry, struct stat permissions, const cha
 /*
     ANALYZE FILE FUNCTION IMPLEMENTATION
 */
-void analyze_file(const char *dir_entry, const char *dir_name){
+int analyze_file(const char *dir_entry, const char *dir_name){
 
-    int result=chmod(dir_entry, S_IRUSR); //giving read access rights to the "malicious file"
+    int give_access=chmod(dir_entry, S_IRUSR); //giving read access to the "malicious file"
 
     char argument[100];  //making the command to run the script
     snprintf(argument, sizeof(argument), "./verify_for_malicious.sh \"%s\"", dir_entry);
@@ -307,13 +319,16 @@ void analyze_file(const char *dir_entry, const char *dir_name){
     if(file_status != 0) fprintf(stderr, "(Syntactic Analysis) \"%s\" from \"%s\" is potentially malicious or corrupted.\n", basename((char *)dir_entry), dir_name);
     else fprintf(stderr, "(Syntactic Analysis) \"%s\" from \"%s\" is safe.\n", basename((char *)dir_entry), dir_name);
 
-    result = chmod(dir_entry, 0); //changing again the acces rights 
-    close(result);
+    give_access = chmod(dir_entry, 0); //changing again the acces rights to 0
+    close(give_access);
         
-    write(STDERR_FILENO, "\n", 1);
+    return file_status;
 }
 
 
+/*
+    MAIN FUNCTION
+*/
 int main(int argc, char *argv[]){
 
     write(STDERR_FILENO,"\n",1);
@@ -397,7 +412,7 @@ int main(int argc, char *argv[]){
                 return EXIT_SUCCESS;
             }
             else if(pid < 0){
-                write(STDERR_FILENO,"error: fork() failed!\n", strlen("error: fork() failed!\n"));
+                write(STDERR_FILENO,"*main* error: fork() for parent child failed!\n", strlen("*main* error: fork() for parent child failed!\n"));
                 return EXIT_FAILURE;
             }
         }

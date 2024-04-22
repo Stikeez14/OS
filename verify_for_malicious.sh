@@ -22,9 +22,7 @@ check_file_stats() {
     local words=$(wc -w < "$1")
     local characters=$(wc -c < "$1")
 
-    echo "Number of lines: $lines"
-    echo "Number of words: $words"
-    echo "Number of characters: $characters"
+    echo "(Syntactic Analysis) \"$(basename "$1")\" has: $lines lines, $words words, $characters characters"
 }
 
 main() {
