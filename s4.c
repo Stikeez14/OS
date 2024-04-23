@@ -105,6 +105,7 @@ void read_directories(const char *path, int snapshot_fd, const char *dir_name, c
         //if an entry is a directory => recursively call again the function with the new path  
         if(S_ISDIR(st.st_mode)) read_directories(entries_path, snapshot_fd, dir_name, isolated_path);
     }
+
     free(entries_path);
     free(file_info);
     closedir(d);     
@@ -190,14 +191,15 @@ void get_previous_snapshot(const char *output_path, const char *dir_name,const c
     //parsing through all the snapshot files from the output that starts with
     //directory name that is monitored
     while((dir_entry = readdir(d)) != NULL){
-        if(strstr(dir_entry->d_name, dir_name) == dir_entry->d_name && strstr(dir_entry->d_name, "_Snapshot_") != NULL){ 
-            if(prev_snapshot_no < current_snapshot_no){
-                strcpy(prev_snapshot_file_name, output_path);    //--> constructing the name of the previous
-                strcat(prev_snapshot_file_name, "/");            //    snapshot file
-                strcat(prev_snapshot_file_name, dir_entry->d_name);
-            }
-            prev_snapshot_no++;   
+
+        if(!(strstr(dir_entry->d_name, dir_name) == dir_entry->d_name && strstr(dir_entry->d_name, "_Snapshot_") != NULL)) continue;
+
+        if(prev_snapshot_no < current_snapshot_no){
+            strcpy(prev_snapshot_file_name, output_path);    //--> constructing the name of the previous
+            strcat(prev_snapshot_file_name, "/");            //    snapshot file
+            strcat(prev_snapshot_file_name, dir_entry->d_name);
         }
+        prev_snapshot_no++;   
     }
     
     //if in the folder is not a previous snapshot => no comparison will be made
@@ -207,6 +209,7 @@ void get_previous_snapshot(const char *output_path, const char *dir_name,const c
     }
         
     int IsDifferent=compare_snapshots(prev_snapshot_file_name, snapshot_file_name, dir_name);
+
     if(!IsDifferent){   //in case no difference is found
         fprintf(stderr, "(Comparing) No differences found between the current and the previous snapshot for  \"%s\"\n", dir_name);
         unlink(prev_snapshot_file_name); //deleting the previous snapshot file name
@@ -275,10 +278,8 @@ void check_permissions(const char *dir_entry, struct stat permissions, const cha
     pid_t pid2;
 
     //checking if all the permissions are missing
-    if(!(permissions.st_mode & S_IXUSR) && !(permissions.st_mode & S_IRUSR) && 
-    !(permissions.st_mode & S_IWUSR) && !(permissions.st_mode & S_IRGRP) && 
-    !(permissions.st_mode & S_IWGRP) && !(permissions.st_mode & S_IXGRP) && 
-    !(permissions.st_mode & S_IROTH) && !(permissions.st_mode & S_IWOTH) && 
+    if(!(permissions.st_mode & S_IXUSR) && !(permissions.st_mode & S_IRUSR) && !(permissions.st_mode & S_IWUSR) && !(permissions.st_mode & S_IRGRP) && 
+    !(permissions.st_mode & S_IWGRP) && !(permissions.st_mode & S_IXGRP) && !(permissions.st_mode & S_IROTH) && !(permissions.st_mode & S_IWOTH) && 
     !(permissions.st_mode & S_IXOTH)){     //if all of them are missing => syntactic analysis will be perfomed
 
         fprintf(stderr,"(Checking Permissions) \"%s\" from \"%s\" has no access rights => Performing Syntactic Anaysis!\n", basename((char *)dir_entry), dir_name);
