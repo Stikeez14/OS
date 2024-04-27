@@ -13,44 +13,77 @@
 
 #define MAX_LINE 128
 
+int count_processes=0; //counts the no. child procesess for each monitored directory
+int count_grandchild_procesess=0; //counts the no. grandchild processes for each child process 
+int count_corrupted=0; //counts the no. of files with potential danger
+
+
 /*
     FUNCTION PROTOTYPES
 */
-
-//traverse the directory given as argument and his sub_directories recursively
-//and writes in the snapshot file the path and the name of each entry 
-void read_directories(const char *path, int snapshot_fd, const char *dir_name, char *isolated_path);
-
-//creates a snapshot file in the output directory for each 
-//directory given as argument in the terminal for monitoring.
-void create_snapshot(char *path, char *output_path, char *isolated_path);
-
-//searches in the output directory all the snapshots that starts with the same directory name and calls 
-//the compare_snapshots function if two snapshots are found. If there is only one, no comparation is made.
-//Also overrides the previous snapshot if a difference is found
-void get_previous_snapshot(const char *output_path, const char *dir_name, const char *snapshot_file_name);
-
-//compares the current snapshot (created when the program runs), with the snapshot that was previously created
-//and returns 1 if something is diff, 0 if the snapshots are the same and -1 in case of errors
-int compare_snapshots(const char *prev_snapshot_file_name, const char *current_snapshot_file_name, const char *dir_name);
-
-//checks if a directory entry has all permissions missing
-//takes from read_directories all the function arguments (dir_name is used only for printing)
-void check_permissions(const char *dir_entry, struct stat permissions, const char *dir_name, char *isolated_path, int snapshot_fd);
-
-//performs syntactic analysis for the files that has all permissions missing using the verify_for_malicious script 
-//takes dir_entry from check_permissions and performs the analysis (dir_name is used only for printing to stderr)
-int analyze_file(const char *dir_entry, const char *dir_name, int pipe_fd);
-
-//after the script is executed, the result will be transported through a pipe from the grandchild process to the child process.
-//this function takes the decision of moving or not the corrupted file to the isolated directory
-void result_of_analysis(int pipe_fd[2], const char *dir_entry, char *isolated_path, pid_t pid, const char *dir_name);
+/*
+    Parses through the directory (given as argument for monitoring) and his sub_directories recursively.
+    Writes in the snapshot file the full path and other file information (allocated dinamically) for all entries.
+*/
+void Read_Directories(const char *path, int snapshot_fd, const char *dir_name, char *isolated_path);
 
 
 /*
-    READ DIRECTORIES FUNCTION IMPLEMENTATION
+    Creates a snapshot file in the output directory. The name of the snapshot file contains the name of the monitored
+    directory and a timestamp. This function calls read_directories (for parsing through the directory) and GetPreviousSnapshotThenCompare
+    (for comparing the current snapshot with the previous one).
 */
-void read_directories(const char *path, int snapshot_fd, const char *dir_name, char *isolated_path){
+void Create_Snapshot(char *path, char *output_path, char *isolated_path);
+
+
+/*
+    Parses through the files from the output directory that contains the name of the monitored dir and calls the
+    compare_snapshots function if two snapshot are found. Otherwise, no comparation is made. 
+    After comparation, if a difference is found, the previous snapshot is overriden.
+*/
+void GetPreviousSnapshotThenCompare(const char *output_path, const char *dir_name, const char *snapshot_file_name);
+
+
+/*
+    Compares the current snapshot (created when the program is executed) with the previous snapshot found in the output dir. 
+    Returns 1 if a difference is found, 0 if the snapshot are identical and -1 in case of errors.
+*/
+int Compare_Snapshots(const char *prev_snapshot_file_name, const char *current_snapshot_file_name, const char *dir_name);
+
+
+/*
+    Checks if a directory entry given as parameter has all the access permissions missing and creates a new grandchild 
+    process in that case for running the script and analyzing syntactically the dir entry.
+*/
+void CheckPermissionsAndAnalyze(const char *dir_entry, struct stat permissions, const char *dir_name, char *isolated_path, int snapshot_fd);
+
+
+/*
+    Performs the syntactic analysis for the files that have all the permissions missing by running the scripy 'verifiy_for_malicious'.
+    The result of the analysis is written to the pipe (for transmitting information to the child process)
+*/
+int Analyze_File(const char *dir_entry, const char *dir_name, int pipe_fd);
+
+
+/*
+    Depending on the result transmitted through the pipe, this function takes the decision of moving the corrupted file
+    to the isolated directory or not.
+*/
+void Result_Of_Analysis(int pipe_fd[2], const char *dir_entry, char *isolated_path, pid_t pid, const char *dir_name);
+
+
+/*
+    FUNCTION IMPLEMENTATIONS
+*/
+/*
+    READ DIRECTORIES FUNCTION
+
+    |  path == input directory path                                            |
+    |  snapshot_fd == file descriptor                                          |
+    |  dir_name == input directory name (without path) used only for printing  |
+    |  isolated_path == isolated directory path                                |
+*/
+void Read_Directories(const char *path, int snapshot_fd, const char *dir_name, char *isolated_path){
 
     DIR *d = opendir(path);
     struct dirent *dir_entry;
@@ -86,9 +119,8 @@ void read_directories(const char *path, int snapshot_fd, const char *dir_name, c
             free(entries_path);                                      
             break;   
         }
-        else check_permissions(entries_path,st, dir_name, isolated_path, snapshot_fd);
-            
-            
+        else CheckPermissionsAndAnalyze(entries_path,st, dir_name, isolated_path, snapshot_fd);
+              
         //gets the actual size of each line & used for reallocaating memory 
         size_t data_length = snprintf(NULL, 0, "Path: %s\nSize: %ld bytes\nAccess Rights: %c%c%c %c%c%c %c%c%c\nHard Links: %ld\n", entries_path, st.st_size, (st.st_mode & S_IRUSR) ? 'r' : '-', (st.st_mode & S_IWUSR) ? 'w' : '-', (st.st_mode & S_IXUSR) ? 'x' : '-', (st.st_mode & S_IRGRP) ? 'r' : '-', (st.st_mode & S_IWGRP) ? 'w' : '-', (st.st_mode & S_IXGRP) ? 'x' : '-' , (st.st_mode & S_IROTH) ? 'r' : '-', (st.st_mode & S_IWOTH) ? 'w' : '-', (st.st_mode & S_IXOTH) ? 'x' : '-', st.st_nlink);
 
@@ -107,7 +139,7 @@ void read_directories(const char *path, int snapshot_fd, const char *dir_name, c
         write(snapshot_fd, "\n", 1);   
 
         //if an entry is a directory => recursively call again the function with the new path  
-        if(S_ISDIR(st.st_mode)) read_directories(entries_path, snapshot_fd, dir_name, isolated_path);
+        if(S_ISDIR(st.st_mode)) Read_Directories(entries_path, snapshot_fd, dir_name, isolated_path);
     }
 
     free(entries_path);
@@ -117,9 +149,13 @@ void read_directories(const char *path, int snapshot_fd, const char *dir_name, c
 
 
 /*
-    CREATE SNAPSHOT FUNCTION IMPLEMENTATION
+    CREATE SNAPSHOT FUNCTION
+
+    |  path == input directory path              |
+    |  output_path == output directory path      |
+    |  isolated_path == isolated directory path  |       
 */
-void create_snapshot(char *path, char *output_path, char *isolated_path){
+void Create_Snapshot(char *path, char *output_path, char *isolated_path){
 
     char *dir_name=basename((char *)path);  //gets the name of the input directory
 
@@ -163,7 +199,7 @@ void create_snapshot(char *path, char *output_path, char *isolated_path){
     }
 
     clock_t start=clock();  //getting the cpu time used for the read_directories function
-    read_directories(path, snapshot_fd, dir_name, isolated_path);
+    Read_Directories(path, snapshot_fd, dir_name, isolated_path);
     clock_t end=clock();
 
     double time=(double)(end-start)/CLOCKS_PER_SEC;  
@@ -171,15 +207,18 @@ void create_snapshot(char *path, char *output_path, char *isolated_path){
     if(snapshot_fd != -1) fprintf(stdout, "(Creating) Snapshot created successfully for  \"%s\"  in %g (s)\n", dir_name, time);
     
     close(snapshot_fd);
-    get_previous_snapshot(output_path,dir_name, snapshot_file_name);
-
+    GetPreviousSnapshotThenCompare(output_path,dir_name, snapshot_file_name);
 }
 
 
 /*
-    GET PREVIOUS SNAPSHOT FUNCTION IMPLEMENTATION
+    GET PREVIOUS SNAPSHOT THEN COMPARE FUNCTION
+
+    |  output_path == output directory path                                                    |
+    |  dir_name == input directory name (without path) used only for printing                  |
+    |  snapshot_file_name == name of the current snapshot (output path + dir_name + timestamp) |
 */
-void get_previous_snapshot(const char *output_path, const char *dir_name,const char *snapshot_file_name){
+void GetPreviousSnapshotThenCompare(const char *output_path, const char *dir_name,const char *snapshot_file_name){
 
     DIR *d=opendir(output_path);
     struct dirent *dir_entry;
@@ -213,7 +252,7 @@ void get_previous_snapshot(const char *output_path, const char *dir_name,const c
         return;
     }
         
-    int IsDifferent=compare_snapshots(prev_snapshot_file_name, snapshot_file_name, dir_name);
+    int IsDifferent=Compare_Snapshots(prev_snapshot_file_name, snapshot_file_name, dir_name);
 
     if(!IsDifferent){   //in case no difference is found
         fprintf(stdout, "(Comparing) No differences found between the current and the previous snapshot for  \"%s\"\n", dir_name);
@@ -230,9 +269,13 @@ void get_previous_snapshot(const char *output_path, const char *dir_name,const c
 
 
 /*
-    COMPARE SNAPSHOTS FUNCTION IMPLEMENTATION
+    COMPARE SNAPSHOTS FUNCTION
+
+    |  dir_name == input directory name (without path) used only for printing                          |
+    |  current_snapshot_file_name == name of the current snapshot (output path + dir_name + timestamp) |
+    |  prev_snapshot_file_name == name of the previous snapshot (output path + dir_name + timestamp)   |
 */
-int compare_snapshots(const char *prev_snapshot_file_name, const char *current_snapshot_file_name, const char *dir_name){
+int Compare_Snapshots(const char *prev_snapshot_file_name, const char *current_snapshot_file_name, const char *dir_name){
 
     int snapshot_fd_current=open(current_snapshot_file_name, O_RDONLY, S_IRUSR); //opening the current snapshot file in reading mode
     if(snapshot_fd_current == -1){
@@ -275,21 +318,20 @@ int compare_snapshots(const char *prev_snapshot_file_name, const char *current_s
 }
 
 
-//storing the no. child procesess for each monitored directory in this var
-int count_processes=0;
-int count_grandchild_procesess=0; //storing the no. grandchild processes for each child process in this var
-int count_corrupted=0; //storing the no. of files with potential danger
-
-
 /*
-    CHECK PERMISSIONS FUNCTION IMPLEMENTATION
+    CHECK PERMISSIONS AND ANALYZE FUNCTION
+
+    |  dir_entry == input directory entry                                                              |
+    |  permissions == stores file info retrieved with lstat (checks entries specific access rights)    |           
+    |  dir_name == input directory name (without path) used only for printing                          |
+    |  isolated_path == isolated directory path                                                        |  
 */
-void check_permissions(const char *dir_entry, struct stat permissions, const char *dir_name, char *isolated_path, int snapshot_fd){
+void CheckPermissionsAndAnalyze(const char *dir_entry, struct stat permissions, const char *dir_name, char *isolated_path, int snapshot_fd){
 
     pid_t pid;
 
     int pipe_fd[2];
-    if (pipe(pipe_fd) == -1) {
+    if(pipe(pipe_fd)==-1){
         write(STDERR_FILENO, "*check_permissions* error: pipe() failed!\n", strlen("*check_permissions* error: pipe() failed!\n"));
         return;
     }
@@ -308,11 +350,11 @@ void check_permissions(const char *dir_entry, struct stat permissions, const cha
         if(pid==0){
 
             close(snapshot_fd); //closing because otherwise fork() will start the process of creating snapshots
-            close(pipe_fd[0]);
+            close(pipe_fd[0]);  //close read end of the pipe
 
-            file_status=analyze_file(dir_entry,dir_name, pipe_fd[1]);
+            file_status=Analyze_File(dir_entry,dir_name, pipe_fd[1]);
 
-            close(pipe_fd[1]);   
+            close(pipe_fd[1]);  //close write end of the pipe
             exit(file_status);
 
         }
@@ -320,7 +362,7 @@ void check_permissions(const char *dir_entry, struct stat permissions, const cha
             write(STDERR_FILENO, "*check_permissions* error: fork() for child failed!\n", strlen("*check_permissions* error: fork() for child failed!\n"));
             return;
         }   
-        else result_of_analysis(pipe_fd, dir_entry, isolated_path, pid, dir_name);
+        else Result_Of_Analysis(pipe_fd, dir_entry, isolated_path, pid, dir_name);
         
         fprintf(stdout, "Grandchild Process %d.%d terminated with PID %d and exit code %d for file  \"%s\"  from  \"%s\"\n", count_processes, count_grandchild_procesess, getpid(), pid, basename((char *)dir_entry), dir_name);
         write(STDOUT_FILENO, "\n", 1);
@@ -329,9 +371,13 @@ void check_permissions(const char *dir_entry, struct stat permissions, const cha
 
 
 /*
-    ANALYZE FILE FUNCTION IMPLEMENTATION
+    ANALYZE FILE FUNCTION
+
+    |  dir_entry == input directory entry                                     |
+    |  dir_name == input directory name (without path) used only for printing |
+    |  pipe_fd == pipe for inter-process communication                        |
 */
-int analyze_file(const char *dir_entry, const char *dir_name, int pipe_fd){
+int Analyze_File(const char *dir_entry, const char *dir_name, int pipe_fd){
 
     int give_access=chmod(dir_entry, S_IRUSR); //giving read access to the "malicious file"
 
@@ -350,15 +396,21 @@ int analyze_file(const char *dir_entry, const char *dir_name, int pipe_fd){
 
 
 /*
-    RESULT OF ANALYSIS FUNCTION IMPLEMENTATION
-*/
-void result_of_analysis(int pipe_fd[2], const char *dir_entry, char *isolated_path, pid_t pid, const char *dir_name){
+    RESULT OF ANALYSIS FUNCTION
 
-    close(pipe_fd[1]); // Close write end of the pipe
+    |  pipe_fd == pipe for inter-process communication                        |  
+    |  dir_entry == input directory entry                                     |
+    |  output_path == output directory path                                   |
+    |  pid == process id (used only for printing in this function)            |
+    |  dir_name == input directory name (without path) used only for printing |  
+*/
+void Result_Of_Analysis(int pipe_fd[2], const char *dir_entry, char *isolated_path, pid_t pid, const char *dir_name){
+
+    close(pipe_fd[1]); //close write end of the pipe
     int file_status;
 
-    read(pipe_fd[0], &file_status, sizeof(file_status)); // Read result from the pipe
-    close(pipe_fd[0]); // Close read end of the pipe
+    read(pipe_fd[0], &file_status, sizeof(file_status)); //read result from the pipe
+    close(pipe_fd[0]); //close read end of the pipe
 
     if(file_status != 0){ //if status is 0, the file is safe, otherwise it will be moved to the isolated directory with rename function
 
@@ -450,7 +502,7 @@ int main(int argc, char *argv[]){
 
             if(pid == 0){
                 char *path = argv[i];              
-                create_snapshot(path, output_path, isolated_path);   
+                Create_Snapshot(path, output_path, isolated_path);   
                 fprintf(stdout,"Child Process %d terminated with PID %d and %d files with potential danger for  \"%s\"\n", count_processes, getpid(), count_corrupted, basename((char *)path));
                 return EXIT_SUCCESS;
             }
