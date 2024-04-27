@@ -275,8 +275,10 @@ int compare_snapshots(const char *prev_snapshot_file_name, const char *current_s
 }
 
 
-//storing the no_of child procesess for each monitored directory in this var
-int count_child_procesess=0;
+//storing the no. child procesess for each monitored directory in this var
+int count_processes=0;
+int count_grandchild_procesess=0; //storing the no. grandchild processes for each child process in this var
+int count_corrupted=0; //storing the no. of files with potential danger
 
 
 /*
@@ -301,7 +303,7 @@ void check_permissions(const char *dir_entry, struct stat permissions, const cha
         
         int file_status;
         pid=fork();
-        count_child_procesess++;
+        count_grandchild_procesess++;
 
         if(pid==0){
 
@@ -314,9 +316,13 @@ void check_permissions(const char *dir_entry, struct stat permissions, const cha
             exit(file_status);
 
         }
-        else if(pid < 0) write(STDERR_FILENO, "*check_permissions* error: fork() for child failed!\n", strlen("*check_permissions* error: fork() for child failed!\n"));
+        else if(pid < 0){
+            write(STDERR_FILENO, "*check_permissions* error: fork() for child failed!\n", strlen("*check_permissions* error: fork() for child failed!\n"));
+            return;
+        }   
         else result_of_analysis(pipe_fd, dir_entry, isolated_path, pid, dir_name);
         
+        fprintf(stdout, "Grandchild Process %d.%d terminated with PID %d and exit code %d for file  \"%s\"  from  \"%s\"\n", count_processes, count_grandchild_procesess, getpid(), pid, basename((char *)dir_entry), dir_name);
         write(STDOUT_FILENO, "\n", 1);
     }
 }
@@ -359,11 +365,11 @@ void result_of_analysis(int pipe_fd[2], const char *dir_entry, char *isolated_pa
         strcat(isolated_path, basename((char *)dir_entry));
         rename(dir_entry, isolated_path); 
 
+        count_corrupted++;
         fprintf(stdout, "(Syntactic Analysis) \"%s\" from \"%s\" is malicious or corrupted => Moving it to the isolated directory!\n", basename((char *)dir_entry), dir_name);
     } 
     else fprintf(stdout, "(Syntactic Analysis) \"%s\" from \"%s\" is SAFE!\n", basename((char *)dir_entry), dir_name);
 
-    fprintf(stdout, "Grandchild Process %d terminated with PID %d and exit code %d for file  \"%s\"  from  \"%s\"\n", count_child_procesess, getpid(), pid, basename((char *)dir_entry), dir_name);
 }
 
 
@@ -430,7 +436,6 @@ int main(int argc, char *argv[]){
     }
 
     pid_t pid;
-    int count_processes=0;
 
     //parsing again through all the argument
     for(int i=1;i<argc;i++){  
@@ -446,7 +451,7 @@ int main(int argc, char *argv[]){
             if(pid == 0){
                 char *path = argv[i];              
                 create_snapshot(path, output_path, isolated_path);   
-                fprintf(stdout,"Child Process %d terminated with PID %d and exit code %d for  \"%s\"\n", count_processes, getpid(), pid, basename((char *)path));
+                fprintf(stdout,"Child Process %d terminated with PID %d and %d files with potential danger for  \"%s\"\n", count_processes, getpid(), count_corrupted, basename((char *)path));
                 return EXIT_SUCCESS;
             }
             else if(pid < 0){
