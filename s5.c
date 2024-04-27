@@ -40,7 +40,11 @@ void check_permissions(const char *dir_entry, struct stat permissions, const cha
 
 //performs syntactic analysis for the files that has all permissions missing using the verify_for_malicious script 
 //takes dir_entry from check_permissions and performs the analysis (dir_name is used only for printing to stderr)
-int analyze_file(const char *dir_entry, const char *dir_name);
+int analyze_file(const char *dir_entry, const char *dir_name, int pipe_fd);
+
+//after the script is executed, the result will be transported through a pipe from the grandchild process to the child process.
+//this function takes the decision of moving or not the corrupted file to the isolated directory
+void result_of_analysis(int pipe_fd[2], const char *dir_entry, char *isolated_path, pid_t pid, const char *dir_name);
 
 
 /*
@@ -280,7 +284,13 @@ int count_child_procesess=0;
 */
 void check_permissions(const char *dir_entry, struct stat permissions, const char *dir_name, char *isolated_path, int snapshot_fd){
 
-    pid_t pid2;
+    pid_t pid;
+
+    int pipe_fd[2];
+    if (pipe(pipe_fd) == -1) {
+        write(STDERR_FILENO, "*check_permissions* error: pipe() failed!\n", strlen("*check_permissions* error: pipe() failed!\n"));
+        return;
+    }
 
     //checking if all the permissions are missing
     if(!(permissions.st_mode & S_IXUSR) && !(permissions.st_mode & S_IRUSR) && !(permissions.st_mode & S_IWUSR) && !(permissions.st_mode & S_IRGRP) && 
@@ -290,24 +300,23 @@ void check_permissions(const char *dir_entry, struct stat permissions, const cha
         fprintf(stdout,"(Checking Permissions) \"%s\" from \"%s\" has no access rights => Performing Syntactic Anaysis!\n", basename((char *)dir_entry), dir_name);
         
         int file_status;
-        pid2=fork();
+        pid=fork();
         count_child_procesess++;
 
-        if(pid2 == 0){
+        if(pid==0){
 
             close(snapshot_fd); //closing because otherwise fork() will start the process of creating snapshots
+            close(pipe_fd[0]);
 
-            file_status=analyze_file(dir_entry,dir_name);
-            strcat(isolated_path, basename((char *)dir_entry));
+            file_status=analyze_file(dir_entry,dir_name, pipe_fd[1]);
 
-            if(file_status!=0) rename(dir_entry, isolated_path); //moving the corrupted file to the isolated direvtory 
-            fprintf(stdout, "Child Process %d terminated with PID %d and exit code %d for file  \"%s\"  from  \"%s\"\n", count_child_procesess, getpid(), pid2, basename((char *)dir_entry), dir_name);
+            close(pipe_fd[1]);   
+            exit(file_status);
 
-            exit(EXIT_SUCCESS);    
         }
-        else if(pid2 < 0) write(STDERR_FILENO, "*check_permissions* error: fork() for child failed!\n", strlen("*check_permissions* error: fork() for child failed!\n"));
+        else if(pid < 0) write(STDERR_FILENO, "*check_permissions* error: fork() for child failed!\n", strlen("*check_permissions* error: fork() for child failed!\n"));
+        else result_of_analysis(pipe_fd, dir_entry, isolated_path, pid, dir_name);
         
-        wait(NULL);
         write(STDOUT_FILENO, "\n", 1);
     }
 }
@@ -316,7 +325,7 @@ void check_permissions(const char *dir_entry, struct stat permissions, const cha
 /*
     ANALYZE FILE FUNCTION IMPLEMENTATION
 */
-int analyze_file(const char *dir_entry, const char *dir_name){
+int analyze_file(const char *dir_entry, const char *dir_name, int pipe_fd){
 
     int give_access=chmod(dir_entry, S_IRUSR); //giving read access to the "malicious file"
 
@@ -324,13 +333,37 @@ int analyze_file(const char *dir_entry, const char *dir_name){
     snprintf(argument, sizeof(argument), "./verify_for_malicious.sh \"%s\"", dir_entry);
     
     int file_status = system(argument); //executing the script
-    if(file_status != 0) fprintf(stdout, "(Syntactic Analysis) \"%s\" from \"%s\" is malicious or corrupted.\n", basename((char *)dir_entry), dir_name);
-    else fprintf(stdout, "(Syntactic Analysis) \"%s\" from \"%s\" is SAFE.\n", basename((char *)dir_entry), dir_name);
+    write(pipe_fd, &file_status, sizeof(file_status)); //writing to the pipe the result
+    close(pipe_fd);
 
     give_access = chmod(dir_entry, 0); //changing again the acces rights to 0
     close(give_access);
         
     return file_status;
+}
+
+
+/*
+    RESULT OF ANALYSIS FUNCTION IMPLEMENTATION
+*/
+void result_of_analysis(int pipe_fd[2], const char *dir_entry, char *isolated_path, pid_t pid, const char *dir_name){
+
+    close(pipe_fd[1]); // Close write end of the pipe
+    int file_status;
+
+    read(pipe_fd[0], &file_status, sizeof(file_status)); // Read result from the pipe
+    close(pipe_fd[0]); // Close read end of the pipe
+
+    if(file_status != 0){ //if status is 0, the file is safe, otherwise it will be moved to the isolated directory with rename function
+
+        strcat(isolated_path, basename((char *)dir_entry));
+        rename(dir_entry, isolated_path); 
+
+        fprintf(stdout, "(Syntactic Analysis) \"%s\" from \"%s\" is malicious or corrupted => Moving it to the isolated directory!\n", basename((char *)dir_entry), dir_name);
+    } 
+    else fprintf(stdout, "(Syntactic Analysis) \"%s\" from \"%s\" is SAFE!\n", basename((char *)dir_entry), dir_name);
+
+    fprintf(stdout, "Grandchild Process %d terminated with PID %d and exit code %d for file  \"%s\"  from  \"%s\"\n", count_child_procesess, getpid(), pid, basename((char *)dir_entry), dir_name);
 }
 
 
@@ -413,11 +446,11 @@ int main(int argc, char *argv[]){
             if(pid == 0){
                 char *path = argv[i];              
                 create_snapshot(path, output_path, isolated_path);   
-                fprintf(stdout,"Parent Process %d terminated with PID %d and exit code %d for  \"%s\"\n", count_processes, getpid(), pid, basename((char *)path));
+                fprintf(stdout,"Child Process %d terminated with PID %d and exit code %d for  \"%s\"\n", count_processes, getpid(), pid, basename((char *)path));
                 return EXIT_SUCCESS;
             }
             else if(pid < 0){
-                write(STDERR_FILENO,"*main* error: fork() for parent child failed!\n", strlen("*main* error: fork() for parent child failed!\n"));
+                write(STDERR_FILENO,"*main* error: fork() for child failed!\n", strlen("*main* error: fork() for child failed!\n"));
                 return EXIT_FAILURE;
             }
         }
