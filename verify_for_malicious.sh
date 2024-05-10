@@ -47,6 +47,9 @@ main() {
         fi
 
         check_for_keywords "$filename"
+        if [[ $? -eq 1 ]]; then
+            return 1
+        fi
     fi
 
     return $file_stats_result
