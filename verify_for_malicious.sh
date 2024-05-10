@@ -14,7 +14,7 @@ check_file_stats() {
 }
 
 check_for_non_ascii() {
-    if [[ $(tr -d '[:print:]' < "$1") ]]; then
+    if tr -d '[:print:]' < "$1" | grep -q .; then
         echo "(Syntactic Analysis) \"$(basename "$1")\" contains non-ASCII characters."
         return 1
     fi
@@ -39,10 +39,17 @@ main() {
     filename="$1"
 
     check_file_stats "$filename"
-    if [[ $? -eq 1 ]]; then
+    local file_stats_result=$?
+    if [[ $file_stats_result -eq 1 ]]; then
         check_for_non_ascii "$filename"
+        if [[ $? -eq 1 ]]; then
+            return 1
+        fi
+
         check_for_keywords "$filename"
     fi
+
+    return $file_stats_result
 }
 
 main "$@"

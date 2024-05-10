@@ -59,7 +59,7 @@ I tested my implementation on my `Fedora` operating system. The only problem I e
 
 ## *Files:*
 
-The project contains the `final_build.c`, the executable of the project, `run_final_build`, the script for the syntactic analysis, `verify_for_malicious.sh`, this `README.md` file and all the old versions of the project that can be fount in the `old_versions` directory.
+The project contains the `final_build.c`, the executable of the project, `run_final_build`, the script for the syntactic analysis, `verify_for_malicious.sh`, this `README.md` file, all the old versions of the project that can be fount in the `old_versions` directory and two text files that can be used for testing the syntactic analysis and isolation of corrupted files, `test_corrupted_keyword`, `test_corrupted_nonascii`
 
 ## *Running The Project:*
 
