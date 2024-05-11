@@ -50,16 +50,18 @@ The program is designed to monitor directories, create snapshots of directory co
 
 ## Files:
 
-* The project contains: 
+The project contains: 
 - the  `final_build.c` ;
 - the executable of the project,  `run_final_build` ; 
 - the script for the syntactic analysis,  `verify_for_malicious.sh` ; 
 - this  `README.md`  file;
 - all the old versions of the project that can be found in the  `old_versions`  directory
 - two text files that can be used for testing the syntactic analysis and isolation of corrupted files,  `test_corrupted_keyword` , `test_corrupted_nonascii` .
+- the presentation about how the program was tested, `Outcomes & Testing.pdf` 
 
 ## Running The Project:
 
-* The project can be compiled using  `gcc -o run_final_build final_build.c` . After compiling, the project can be runned using  `./run_final_build -o OUTPUT_DIR -s ISOLATED_DIR DIR_1 DIR_ 2 DIR_3 ... ` [_NOTE:  `-o Output_dir` ,`-s Isolated_dir` and the directories that are going to be monitored can be placed in any order ( `e.g. ./run_final_build DIR_1 -s ISOLATED_DIR DIR_2 -o OUTPUT_dir DIR_3` )].
+* The project can be compiled using  `gcc -o run_final_build final_build.c` . After compiling, the project can be runned using  `./run_final_build -o OUTPUT_DIR -s ISOLATED_DIR DIR_1 DIR_ 2 DIR_3 ... ` 
+* NOTE:  `-o Output_dir` ,`-s Isolated_dir` and the directories that are going to be monitored can be placed in any order ( `e.g. ./run_final_build DIR_1 -s ISOLATED_DIR DIR_2 -o OUTPUT_dir DIR_3` ).
 
 
