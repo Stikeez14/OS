@@ -49,6 +49,8 @@ main() {
         check_for_keywords "$filename"
         if [[ $? -eq 1 ]]; then
             return 1
+        else 
+            return 0
         fi
     fi
 
