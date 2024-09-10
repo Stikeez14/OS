@@ -44,7 +44,7 @@ The program is designed to monitor directories, create snapshots of directory co
 # Project Testing
 
 * I tested my implementation on my  `Fedora`  operating system. The only problem I encountered when I tested the algorrithm was when I monitored the same directory more than once (because the processes are running in parallel I encountered a problem with the comparation of snapshots). 
-* For testing the analysis of corrputed files, I used two  `.txt`  files,  `test_corrupted_keywords`  and  `test_corrupted_nonascii` . In the monitored directories I created files and copied the text from one of the .txt files in them. Then with  `chmod 000`  I removed all the access rights.
+* For testing the analysis of corruuted files, I used two  `.txt`  files,  `test_corrupted_keywords`  and  `test_corrupted_nonascii` . In the monitored directories I created files and copied the text from one of the .txt files in them. Then with  `chmod 000`  I removed all the access rights.
 
 # Additional Project Information
 
